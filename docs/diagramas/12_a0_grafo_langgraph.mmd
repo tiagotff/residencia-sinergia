@@ -1,0 +1,18 @@
+stateDiagram-v2
+    [*] --> autenticar
+    autenticar --> classificar_intencao
+    classificar_intencao --> a1_recepcao: atestado
+    classificar_intencao --> a2_bem_estar: pausa, direito, benefício, procedimento, saúde, EPI
+    classificar_intencao --> a3_apoio: consulta de alertas (gestor, RH, TST)
+    classificar_intencao --> baixa_fisica: baixa do atestado físico (RH)
+    a1_recepcao --> confirmar_colaborador
+    confirmar_colaborador --> registrar: confirmado
+    confirmar_colaborador --> a1_recepcao: correção
+    note right of confirmar_colaborador : interrupt com checkpoint
+    a2_bem_estar --> entregar
+    a3_apoio --> entregar
+    registrar --> entregar
+    baixa_fisica --> entregar
+    entregar --> avaliar_judge: saídas do A2, assíncrono
+    entregar --> [*]
+    avaliar_judge --> [*]

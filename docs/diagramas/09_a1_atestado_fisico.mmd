@@ -1,0 +1,19 @@
+sequenceDiagram
+    actor C as Colaborador
+    participant A0 as A0 Orquestrador
+    participant BD as PostgreSQL
+    actor RH as RH
+    participant A3 as A3 Apoio
+    A0->>C: Atestado registrado. Entregue o original ao RH até o prazo
+    A0->>BD: Grava prazo_entrega_fisica
+    alt Entregue no prazo
+        C->>RH: Entrega o atestado físico
+        RH->>A0: Dá baixa no sistema
+        A0->>BD: Grava recebido_fisico_em e recebido_fisico_por
+        A0->>C: Alerta: atestado físico recebido pelo RH
+    else Prazo vencido sem baixa
+        A3->>BD: Rotina diária encontra atestado pendente
+        A3->>A0: Alerta A3.5 para o RH
+        A0->>RH: Atestado físico pendente
+        A0->>C: Lembrete: entregue o original ao RH
+    end

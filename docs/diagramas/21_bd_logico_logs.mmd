@@ -1,0 +1,83 @@
+erDiagram
+    direction LR
+    COLABORADOR ||--o{ MENSAGEM : recebe
+    CANAL ||--o{ MENSAGEM : ""
+    LEMBRETE |o--o{ MENSAGEM : origina
+    ALERTA |o--o{ MENSAGEM : origina
+    ATESTADO |o--o{ MENSAGEM : origina
+    MENSAGEM ||--|{ LOG_ENVIO : ""
+    STATUS_MENSAGEM ||--o{ LOG_ENVIO : ""
+    USUARIO ||--o{ INTERACAO_CHAT : ""
+    EXECUCAO_AGENTE |o--o{ INTERACAO_CHAT : responde
+    USUARIO |o--o{ EXECUCAO_AGENTE : ""
+    EXECUCAO_AGENTE ||--o{ AVALIACAO_JUDGE : ""
+    USUARIO |o--o{ LOG_ACESSO : ""
+    CANAL {
+        smallint id_canal PK
+        varchar nome UK
+    }
+    STATUS_MENSAGEM {
+        smallint id_status PK
+        varchar codigo UK
+        varchar descricao
+    }
+    MENSAGEM {
+        uuid id_mensagem PK
+        bigint id_destinatario FK
+        smallint id_canal FK
+        varchar agente_origem
+        bigint id_lembrete FK
+        bigint id_alerta FK
+        bigint id_atestado FK
+        varchar assunto
+        text conteudo
+        timestamptz criado_em
+    }
+    LOG_ENVIO {
+        bigint id_log PK
+        uuid id_mensagem FK
+        smallint id_status FK
+        smallint tentativa
+        text detalhe
+        timestamptz registrado_em
+    }
+    INTERACAO_CHAT {
+        bigint id_interacao PK
+        bigint id_usuario FK
+        varchar thread_id
+        varchar papel
+        uuid id_execucao FK
+        text conteudo
+        timestamptz criado_em
+    }
+    EXECUCAO_AGENTE {
+        uuid id_execucao PK
+        varchar thread_id
+        varchar agente
+        varchar no_grafo
+        bigint id_usuario FK
+        varchar modelo_llm
+        int tokens_entrada
+        int tokens_saida
+        int latencia_ms
+        varchar status
+        text erro
+        timestamptz iniciado_em
+        timestamptz finalizado_em
+    }
+    AVALIACAO_JUDGE {
+        bigint id_avaliacao PK
+        uuid id_execucao FK
+        varchar criterio
+        smallint nota
+        text justificativa
+        timestamptz avaliado_em
+    }
+    LOG_ACESSO {
+        bigint id_acesso PK
+        bigint id_usuario FK
+        varchar login_informado
+        varchar evento
+        inet ip_origem
+        timestamptz ocorrido_em
+    }

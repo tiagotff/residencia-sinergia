@@ -1,0 +1,15 @@
+flowchart TD
+    C1[Cargo] --> E1[Embedding 8]
+    C2[Área e setor] --> E2[Embedding 8]
+    C3[UF] --> E3[Embedding 4]
+    C4[Benefício] --> E4[Embedding 8]
+    N1[Numéricas: tempo de empresa, idade, dependentes, jornada, benefícios ativos, taxa de aceite] --> NM[Normalização]
+    E1 --> CAT[Concatenação]
+    E2 --> CAT
+    E3 --> CAT
+    E4 --> CAT
+    NM --> CAT
+    CAT --> D1[Densa 128 + ReLU + Dropout 0,3]
+    D1 --> D2[Densa 64 + ReLU]
+    D2 --> OUT[Densa 1 + Sigmoide]
+    OUT --> PR([Probabilidade de adesão ao benefício])

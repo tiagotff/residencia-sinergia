@@ -1,0 +1,100 @@
+erDiagram
+    direction LR
+    UF ||--o{ MUNICIPIO : ""
+    AREA ||--|{ SETOR : ""
+    CARGO ||--o{ COLABORADOR : ""
+    SETOR ||--o{ COLABORADOR : ""
+    MUNICIPIO ||--o{ COLABORADOR : ""
+    COLABORADOR ||--o{ COLABORADOR : gestor
+    COLABORADOR ||--o| USUARIO : ""
+    CONSELHO_PROFISSIONAL ||--o{ PROFISSIONAL_SAUDE : ""
+    UF ||--o{ PROFISSIONAL_SAUDE : ""
+    COLABORADOR ||--o{ ATESTADO : ""
+    PROFISSIONAL_SAUDE ||--o{ ATESTADO : ""
+    CID ||--o{ ATESTADO : ""
+    MUNICIPIO ||--o{ ATESTADO : ""
+    USUARIO |o--o{ ATESTADO : baixa
+    UF {
+        char sigla_uf PK
+        varchar nome UK
+    }
+    MUNICIPIO {
+        int id_municipio PK
+        varchar nome
+        char sigla_uf FK
+    }
+    AREA {
+        int id_area PK
+        varchar nome UK
+    }
+    SETOR {
+        int id_setor PK
+        int id_area FK
+        varchar nome
+    }
+    CARGO {
+        int id_cargo PK
+        varchar nome UK
+        varchar cbo
+    }
+    COLABORADOR {
+        bigint id_colaborador PK
+        varchar matricula UK
+        varchar nome
+        varchar email UK
+        int id_cargo FK
+        int id_setor FK
+        int id_municipio FK
+        bigint id_gestor FK
+        date data_admissao
+        date data_nascimento
+        smallint qtd_dependentes
+        time jornada_inicio
+        time jornada_fim
+        boolean ativo
+        timestamptz criado_em
+    }
+    USUARIO {
+        bigint id_usuario PK
+        bigint id_colaborador FK
+        varchar login UK
+        varchar senha_hash
+        varchar perfil
+        boolean ativo
+        timestamptz criado_em
+    }
+    CONSELHO_PROFISSIONAL {
+        smallint id_conselho PK
+        varchar sigla UK
+        varchar descricao
+    }
+    PROFISSIONAL_SAUDE {
+        bigint id_profissional PK
+        smallint id_conselho FK
+        varchar numero_registro
+        char sigla_uf FK
+        varchar nome
+        boolean verificado
+    }
+    CID {
+        varchar codigo_cid PK
+        varchar descricao
+        varchar capitulo
+    }
+    ATESTADO {
+        bigint id_atestado PK
+        bigint id_colaborador FK
+        bigint id_profissional FK
+        varchar codigo_cid FK
+        int id_municipio FK
+        date data_emissao
+        timestamptz inicio_afastamento
+        timestamptz fim_afastamento
+        varchar arquivo_uri
+        varchar origem_dados
+        varchar status
+        timestamptz postado_em
+        date prazo_entrega_fisica
+        timestamptz recebido_fisico_em
+        bigint recebido_fisico_por FK
+    }

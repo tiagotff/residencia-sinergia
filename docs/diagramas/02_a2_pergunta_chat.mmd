@@ -1,0 +1,17 @@
+sequenceDiagram
+    actor C as Colaborador
+    participant A0 as A0 Orquestrador
+    participant A2 as A2 Bem-Estar
+    participant RAG as Bases RAG
+    participant BD as PostgreSQL
+    participant J as LLM Judge
+    C->>A0: Pergunta no chat
+    A0->>BD: Recupera perfil pelo login (cargo, setor, benefícios)
+    A0->>A2: Encaminha pergunta + perfil
+    A2->>RAG: Busca trechos relevantes
+    A2->>BD: Consulta dados do colaborador
+    A2-->>A0: Resposta com fontes
+    A0-->>C: Resposta no chat
+    A0->>BD: Registra interação e execução
+    A0-)J: Envia a resposta para avaliação assíncrona
+    J->>BD: Grava notas por critério

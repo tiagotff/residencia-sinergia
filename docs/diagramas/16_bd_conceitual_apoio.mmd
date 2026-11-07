@@ -1,0 +1,15 @@
+erDiagram
+    direction LR
+    CARGO }o--o{ EPI : exige
+    COLABORADOR ||--o{ ENTREGA_EPI : recebe
+    EPI ||--o{ ENTREGA_EPI : entregue
+    COLABORADOR ||--o{ SOLICITACAO_EPI : abre
+    EPI ||--o{ SOLICITACAO_EPI : solicitado
+    SOLICITACAO_EPI |o--o| ENTREGA_EPI : "atendida por"
+    COLABORADOR ||--o{ PERIODO_AQUISITIVO : adquire
+    PERIODO_AQUISITIVO ||--o{ FERIAS : concede
+    COLABORADOR |o--o{ ALERTA : envolve
+    ALERTA }o--o{ ATESTADO : evidencia
+    COLABORADOR ||--o{ MENSAGEM : recebe
+    LEMBRETE |o--o{ MENSAGEM : origina
+    ALERTA |o--o{ MENSAGEM : origina

@@ -1,0 +1,23 @@
+erDiagram
+    BASE_CONHECIMENTO ||--o{ DOCUMENTO : ""
+    DOCUMENTO ||--|{ TRECHO : ""
+    BASE_CONHECIMENTO {
+        smallint id_base PK
+        varchar nome UK
+    }
+    DOCUMENTO {
+        bigint id_documento PK
+        smallint id_base FK
+        varchar titulo
+        varchar fonte
+        varchar versao
+        boolean vigente
+        timestamptz indexado_em
+    }
+    TRECHO {
+        bigint id_trecho PK
+        bigint id_documento FK
+        int ordem
+        text conteudo
+        vector embedding
+    }

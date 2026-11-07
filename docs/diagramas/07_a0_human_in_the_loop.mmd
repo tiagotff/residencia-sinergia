@@ -1,0 +1,8 @@
+flowchart TD
+    EX[A1 extrai os dados do atestado] --> INT[[interrupt do LangGraph: aguarda o colaborador]]
+    INT --> CK[(Checkpoint no PostgreSQL por thread_id)]
+    CK -- Colaborador confirma ou corrige --> RES[Fluxo retomado do mesmo ponto]
+    RES --> REG[(Atestado registrado)]
+    CK -- 24 h sem resposta --> LEM[A0 envia lembrete ao colaborador]
+    LEM --> CK
+    CK -- 72 h sem resposta --> RHC[Atestado segue para conferência do RH]
