@@ -1,0 +1,16 @@
+flowchart TD
+    L[Login e senha] --> AU{Credenciais válidas?}
+    AU -- Não --> LA[(log_acesso FALHA_LOGIN)]
+    AU -- Sim --> SE[Sessão com id_colaborador]
+    SE --> UP[Upload do atestado]
+    UP --> EX[LLM extrai campos com saída estruturada]
+    EX --> LG{Leitura confiável?}
+    LG -- Não --> RE[Solicita nova foto]
+    RE --> UP
+    LG -- Sim --> VR[Valida registro profissional e CID]
+    VR --> CF{Colaborador confirma os dados? Fluxo pausado}
+    CF -- Sim --> GR[(atestado CONFIRMADO, origem IA)]
+    CF -- Não --> FM[Formulário de correção]
+    FM --> GR2[(atestado CONFIRMADO, origem MANUAL)]
+    GR --> MF[A0 confirma o registro e pede a entrega do atestado físico ao RH]
+    GR2 --> MF

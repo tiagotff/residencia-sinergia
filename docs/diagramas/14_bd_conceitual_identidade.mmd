@@ -1,0 +1,11 @@
+erDiagram
+    direction TB
+    AREA ||--|{ SETOR : agrupa
+    SETOR ||--o{ COLABORADOR : lota
+    CARGO ||--o{ COLABORADOR : ocupa
+    MUNICIPIO ||--o{ COLABORADOR : reside
+    COLABORADOR ||--o| USUARIO : acessa
+    COLABORADOR ||--o{ ATESTADO : apresenta
+    PROFISSIONAL_SAUDE ||--o{ ATESTADO : emite
+    CID ||--o{ ATESTADO : classifica
+    USUARIO |o--o{ ATESTADO : "dá baixa"

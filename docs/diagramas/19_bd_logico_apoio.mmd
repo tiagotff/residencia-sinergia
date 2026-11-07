@@ -1,0 +1,94 @@
+erDiagram
+    direction LR
+    CARGO ||--o{ CARGO_EPI : ""
+    EPI ||--o{ CARGO_EPI : ""
+    COLABORADOR ||--o{ ENTREGA_EPI : ""
+    EPI ||--o{ ENTREGA_EPI : ""
+    COLABORADOR ||--o{ SOLICITACAO_EPI : ""
+    EPI ||--o{ SOLICITACAO_EPI : ""
+    ENTREGA_EPI |o--o| SOLICITACAO_EPI : atende
+    SOLICITACAO_EPI {
+        bigint id_solicitacao PK
+        bigint id_colaborador FK
+        int id_epi FK
+        varchar motivo
+        text descricao
+        varchar status
+        bigint id_entrega FK
+        timestamptz aberta_em
+        timestamptz atendida_em
+    }
+    COLABORADOR ||--o{ REGISTRO_PONTO : ""
+    COLABORADOR ||--o{ PERIODO_AQUISITIVO : ""
+    PERIODO_AQUISITIVO ||--o{ FERIAS : ""
+    TIPO_ALERTA ||--o{ ALERTA : ""
+    COLABORADOR |o--o{ ALERTA : ""
+    SETOR |o--o{ ALERTA : ""
+    USUARIO |o--o{ ALERTA : resolve
+    ALERTA ||--o{ ALERTA_ATESTADO : ""
+    ATESTADO ||--o{ ALERTA_ATESTADO : ""
+    EPI {
+        int id_epi PK
+        varchar nome
+        varchar numero_ca UK
+        date validade_ca
+        smallint vida_util_dias
+    }
+    CARGO_EPI {
+        int id_cargo PK, FK
+        int id_epi PK, FK
+        boolean obrigatorio
+    }
+    ENTREGA_EPI {
+        bigint id_entrega PK
+        bigint id_colaborador FK
+        int id_epi FK
+        date data_entrega
+        smallint quantidade
+        timestamptz registrado_em
+    }
+    REGISTRO_PONTO {
+        bigint id_registro PK
+        bigint id_colaborador FK
+        varchar tipo_marcacao
+        timestamptz marcado_em
+    }
+    PERIODO_AQUISITIVO {
+        bigint id_periodo PK
+        bigint id_colaborador FK
+        date inicio
+        date fim
+        smallint dias_direito
+    }
+    FERIAS {
+        bigint id_ferias PK
+        bigint id_periodo FK
+        date data_inicio
+        date data_fim
+        date data_retorno
+        varchar status
+    }
+    TIPO_ALERTA {
+        smallint id_tipo_alerta PK
+        varchar codigo UK
+        varchar descricao
+        varchar perfil_destino
+    }
+    ALERTA {
+        bigint id_alerta PK
+        smallint id_tipo_alerta FK
+        varchar escopo
+        bigint id_colaborador FK
+        int id_setor FK
+        uuid id_execucao FK
+        varchar severidade
+        text descricao
+        varchar status
+        timestamptz gerado_em
+        timestamptz resolvido_em
+        bigint resolvido_por FK
+    }
+    ALERTA_ATESTADO {
+        bigint id_alerta PK, FK
+        bigint id_atestado PK, FK
+    }

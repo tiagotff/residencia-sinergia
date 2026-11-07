@@ -1,0 +1,11 @@
+stateDiagram-v2
+    [*] --> ENFILEIRADA
+    ENFILEIRADA --> ENVIADA
+    ENVIADA --> ENTREGUE
+    ENTREGUE --> LIDA
+    ENFILEIRADA --> ERRO
+    ENVIADA --> ERRO
+    ERRO --> REENVIO: menos de 3 tentativas
+    REENVIO --> ENVIADA
+    ERRO --> [*]: 3 tentativas, A0 notifica RH
+    LIDA --> [*]

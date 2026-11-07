@@ -1,0 +1,10 @@
+flowchart TD
+    V[(vw_epi_pendente)] --> A3[A3.4 identifica troca próxima, CA vencendo ou novo EPI exigido pelo cargo]
+    A3 --> AL[(apoio.alerta para o TST)]
+    A3 --> A2[A2 F6 gera aviso ao colaborador]
+    A2 --> RAG[RAG EPI: troca, conservação e descarte]
+    RAG --> L[(bem_estar.lembrete categoria EPI_TROCA)]
+    L --> A0C[A0 avisa o colaborador]
+    AL --> A0T[A0 notifica o TST]
+    A0T --> EN[TST registra a nova entrega em apoio.entrega_epi]
+    EN --> FIM([Pendência sai da visão])

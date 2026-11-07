@@ -1,0 +1,14 @@
+flowchart TD
+    I([Colaborador relata no chat]) --> T{Situação do EPI}
+    T -- Avariado --> O[A2 orienta: não executar a atividade de risco sem o EPI adequado e avisar o gestor]
+    T -- Perdido --> O
+    T -- Não recebido --> O
+    T -- Tamanho inadequado --> O
+    O --> S[(apoio.solicitacao_epi status ABERTA)]
+    S --> N[A0 notifica TST e gestor]
+    N --> E{TST entrega o EPI em até 24 h?}
+    E -- Sim --> R[(apoio.entrega_epi)]
+    R --> F[Solicitação ATENDIDA]
+    F --> U[A2 envia orientação de uso do novo EPI e indica o treinamento]
+    E -- Não --> AL[A3.4 gera alerta de solicitação atrasada]
+    AL --> N

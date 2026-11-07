@@ -1,0 +1,32 @@
+flowchart TB
+    subgraph CL[Apresentação]
+        direction LR
+        FE[Chat web] ~~~ EM[E-mail SMTP] ~~~ MS[Mensagens]
+    end
+    subgraph API[API REST · FastAPI]
+        direction LR
+        AUTH[/auth: JWT + Argon2id/] ~~~ CHAT[/chat/] ~~~ ATT[/atestados/] ~~~ EPI[/epi/] ~~~ BEN[/beneficios/] ~~~ ALR[/alertas/]
+    end
+    subgraph ORQ[Orquestração · LangGraph · A0]
+        direction LR
+        SCH[APScheduler] --> RT{Roteador de intenção} --> HIL[[Confirmação do atestado]] --> DP[Entrega] -.-> JD[LLM as a Judge assíncrono]
+    end
+    subgraph AG[Agentes]
+        direction LR
+        A1[A1 Recepção · LangChain] ~~~ A2[A2 Bem-Estar · CrewAI] ~~~ A3[A3 Apoio · CrewAI]
+    end
+    subgraph LC[LangChain e modelos]
+        direction LR
+        LLM[ChatGroq · LLM] ~~~ RET[Retrievers PGVector] ~~~ TL[Ferramentas SQL] ~~~ NN[Rede neural de benefícios · ONNX]
+    end
+    subgraph DB[PostgreSQL 16 + pgvector]
+        direction LR
+        S1[(cadastro · afastamento)] ~~~ S2[(bem_estar · apoio)] ~~~ S3[(rag)] ~~~ S4[(orquestracao)]
+    end
+    CL <--> API
+    API <--> ORQ
+    ORQ <--> AG
+    AG <--> LC
+    LC <--> DB
+    ORQ --> DB
+    style A2 stroke-width:3px

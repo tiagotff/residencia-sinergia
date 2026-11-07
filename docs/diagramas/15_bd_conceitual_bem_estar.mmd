@@ -1,0 +1,17 @@
+erDiagram
+    direction LR
+    COLABORADOR ||--o{ PREFERENCIA_PAUSA : configura
+    COLABORADOR }o--o{ BENEFICIO : possui
+    COLABORADOR ||--o{ RECOMENDACAO_BENEFICIO : recebe
+    BENEFICIO ||--o{ RECOMENDACAO_BENEFICIO : recomendado
+    VERSAO_MODELO ||--o{ RECOMENDACAO_BENEFICIO : gera
+    COLABORADOR }o--o{ TREINAMENTO : conclui
+    COLABORADOR ||--o{ EXAME : realiza
+    COLABORADOR }o--o{ VACINA : recebe
+    COLABORADOR ||--o{ LEMBRETE : recebe
+    CARGO }o--o{ TREINAMENTO : exige
+    CARGO }o--o{ TIPO_EXAME : exige
+    TIPO_EXAME ||--o{ EXAME : tipifica
+    EPI |o--o{ TREINAMENTO : orienta
+    BASE_CONHECIMENTO ||--o{ DOCUMENTO : contem
+    DOCUMENTO ||--|{ TRECHO : divide

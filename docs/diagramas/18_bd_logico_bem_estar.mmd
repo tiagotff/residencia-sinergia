@@ -1,0 +1,135 @@
+erDiagram
+    direction LR
+    COLABORADOR ||--o{ PREFERENCIA_PAUSA : ""
+    TIPO_PAUSA ||--o{ PREFERENCIA_PAUSA : ""
+    CANAL ||--o{ PREFERENCIA_PAUSA : ""
+    COLABORADOR ||--o{ COLABORADOR_BENEFICIO : ""
+    BENEFICIO ||--o{ COLABORADOR_BENEFICIO : ""
+    CARGO ||--o{ CARGO_TREINAMENTO : ""
+    TREINAMENTO ||--o{ CARGO_TREINAMENTO : ""
+    COLABORADOR ||--o{ COLABORADOR_TREINAMENTO : ""
+    TREINAMENTO ||--o{ COLABORADOR_TREINAMENTO : ""
+    EPI |o--o{ TREINAMENTO : ""
+    CARGO ||--o{ CARGO_EXAME : ""
+    TIPO_EXAME ||--o{ CARGO_EXAME : ""
+    COLABORADOR ||--o{ EXAME_COLABORADOR : ""
+    TIPO_EXAME ||--o{ EXAME_COLABORADOR : ""
+    COLABORADOR ||--o{ VACINACAO_COLABORADOR : ""
+    VACINA ||--o{ VACINACAO_COLABORADOR : ""
+    AREA |o--o{ EVENTO : ""
+    COLABORADOR ||--o{ LEMBRETE : ""
+    CANAL ||--o{ LEMBRETE : ""
+    COLABORADOR ||--o{ RECOMENDACAO_BENEFICIO : ""
+    BENEFICIO ||--o{ RECOMENDACAO_BENEFICIO : ""
+    VERSAO_MODELO ||--o{ RECOMENDACAO_BENEFICIO : ""
+    VERSAO_MODELO {
+        smallint id_modelo PK
+        varchar versao UK
+        varchar artefato_uri
+        numeric auc_roc
+        numeric precisao_at3
+        boolean ativo
+        timestamptz treinado_em
+    }
+    RECOMENDACAO_BENEFICIO {
+        bigint id_recomendacao PK
+        bigint id_colaborador FK
+        smallint id_beneficio FK
+        smallint id_modelo FK
+        numeric probabilidade
+        smallint posicao
+        varchar status
+        timestamptz gerada_em
+        timestamptz respondida_em
+    }
+    TIPO_PAUSA {
+        smallint id_tipo_pausa PK
+        varchar nome UK
+        varchar descricao
+    }
+    PREFERENCIA_PAUSA {
+        bigint id_preferencia PK
+        bigint id_colaborador FK
+        smallint id_tipo_pausa FK
+        smallint id_canal FK
+        smallint intervalo_minutos
+        smallint duracao_minutos
+        smallint_array dias_semana
+        boolean ativo
+        timestamptz atualizado_em
+    }
+    BENEFICIO {
+        smallint id_beneficio PK
+        varchar nome UK
+        varchar descricao
+    }
+    COLABORADOR_BENEFICIO {
+        bigint id_colaborador PK, FK
+        smallint id_beneficio PK, FK
+        date data_inicio PK
+        date data_fim
+    }
+    TREINAMENTO {
+        int id_treinamento PK
+        varchar titulo UK
+        numeric carga_horaria_h
+        smallint validade_meses
+        int id_epi FK
+    }
+    CARGO_TREINAMENTO {
+        int id_cargo PK, FK
+        int id_treinamento PK, FK
+        boolean obrigatorio
+    }
+    COLABORADOR_TREINAMENTO {
+        bigint id_colaborador PK, FK
+        int id_treinamento PK, FK
+        date data_conclusao PK
+    }
+    TIPO_EXAME {
+        smallint id_tipo_exame PK
+        varchar nome UK
+        smallint periodicidade_meses
+    }
+    CARGO_EXAME {
+        int id_cargo PK, FK
+        smallint id_tipo_exame PK, FK
+    }
+    EXAME_COLABORADOR {
+        bigint id_exame PK
+        bigint id_colaborador FK
+        smallint id_tipo_exame FK
+        date data_realizacao
+    }
+    VACINA {
+        smallint id_vacina PK
+        varchar nome UK
+        smallint doses_previstas
+        smallint reforco_meses
+    }
+    VACINACAO_COLABORADOR {
+        bigint id_colaborador PK, FK
+        smallint id_vacina PK, FK
+        smallint dose PK
+        date data_aplicacao
+    }
+    EVENTO {
+        int id_evento PK
+        varchar titulo
+        varchar tipo
+        timestamptz inicio
+        timestamptz fim
+        int id_area FK
+    }
+    LEMBRETE {
+        bigint id_lembrete PK
+        bigint id_colaborador FK
+        smallint id_canal FK
+        uuid id_execucao FK
+        varchar categoria
+        varchar titulo
+        text conteudo
+        timestamptz agendado_para
+        varchar status
+        timestamptz gerado_em
+    }

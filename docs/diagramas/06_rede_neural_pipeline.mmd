@@ -1,0 +1,18 @@
+flowchart TD
+    subgraph TR[Treino mensal]
+        V[(vw_features_beneficio)] --> P[Pré-processamento: embeddings e normalização]
+        P --> S[Divisão temporal 80/20]
+        S --> T[Treino em PyTorch com perda BCE]
+        T --> AV{Supera a versão ativa e o baseline?}
+        AV -- Sim --> EXP[Exporta ONNX e registra em versao_modelo]
+        AV -- Não --> MANT[Mantém a versão ativa]
+    end
+    subgraph INF[Recomendação mensal]
+        EXP --> I[ONNX Runtime pontua benefícios elegíveis ainda não aderidos]
+        MANT --> I
+        I --> TOP[Top 3 por colaborador]
+        TOP --> RB[(recomendacao_beneficio)]
+        RB --> F2[A2 F2 explica com RAG e A0 entrega]
+        F2 --> FB[Colaborador aceita ou recusa]
+    end
+    FB -. novo dado de treino .-> V

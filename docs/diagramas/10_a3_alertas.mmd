@@ -1,0 +1,15 @@
+flowchart TD
+    CR([Execução diária]) --> A31[A3.1 Afastamento]
+    CR --> A32[A3.2 Epidemiologia: empresa, 7 dias]
+    CR --> A33[A3.3 Férias]
+    CR --> A34[A3.4 EPI]
+    CR --> A35[A3.5 Atestado físico pendente]
+    A31 --> AL[(apoio.alerta)]
+    A32 --> AL
+    A33 --> AL
+    A34 --> AL
+    A35 --> AL
+    A32 --> EV[(apoio.alerta_atestado)]
+    A34 --> A2[A2 F6 avisa o colaborador]
+    A35 --> LC[A0 lembra o colaborador]
+    AL --> A0[A0 notifica o perfil de destino]

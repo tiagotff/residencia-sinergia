@@ -1,0 +1,13 @@
+flowchart TD
+    S([Agendador dispara a cada 15 min]) --> Q[Busca lembretes previstos para o horário]
+    Q --> J{Dentro da jornada?}
+    J -- Não --> X[Reagenda para a próxima janela]
+    J -- Sim --> A{Afastado ou em férias?}
+    A -- Sim --> R[Reagenda para o dia do retorno]
+    A -- Não --> C[CrewAI do A2 consulta tabelas, RAG e rede neural]
+    C --> G[Gera lembrete personalizado]
+    G --> L[(bem_estar.lembrete status GERADO)]
+    L --> A0[A0 entrega pelo canal escolhido]
+    A0 --> LOG[(orquestracao.log_envio)]
+    A0 -.-> JU[LLM as a Judge avalia depois do envio]
+    JU -.-> AV[(orquestracao.avaliacao_judge)]
