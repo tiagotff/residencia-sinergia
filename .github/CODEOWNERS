@@ -1,0 +1,11 @@
+# Substitua cada @usuario pelo usuário do GitHub da pessoa.
+*                                           @tiagotff
+/docs/                                      @tiagotff
+/db/                                        @tiagotff
+/src/sinergia/api/                          @usuario-leo
+/src/sinergia/orquestrador/                 @usuario-leo
+/src/sinergia/agentes/a1_recepcao/          @usuario-italo @usuario-natalia
+/src/sinergia/modelos/rede_neural_beneficios/ @usuario-italo @usuario-natalia
+/src/sinergia/agentes/a2_bem_estar/         @usuario-luana @tiagotff
+/src/sinergia/rag/                          @usuario-joao
+/data/rag/                                  @usuario-joao
