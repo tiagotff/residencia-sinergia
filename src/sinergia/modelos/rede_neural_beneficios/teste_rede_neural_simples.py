@@ -1,142 +1,131 @@
-import numpy as np
+import csv
+from collections import defaultdict
+from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
-class RecomendadorBeneficioSimples(nn.Module):
+# 1. CATÁLOGO DE BENEFÍCIOS DO AGENTE 2 (BEM-ESTAR)
+BENEFICIOS = [
+    "Gympass / Atividade Física",
+    "Apoio Psicológico Online",
+    "Ergonomia e Fisioterapia",
+    "Plano Odontológico",
+    "Telemedicina Familiar",
+]
 
-  def __init__(
-      self,
-      num_cargos=20,
-      num_setores=10,
-      num_beneficios=8,
-      dim_features_num=6,
-  ):
-    super().__init__()
+# 2. DADOS REAIS: BASE BRASILEIRA UCI (Absenteeism at Work - 740 registros)
+caminho_csv = Path(__file__).resolve().parents[4] / "data" / "uci" / "Absenteeism_at_work.csv"
+with open(caminho_csv, mode="r", encoding="utf-8") as arquivo:
+    leitor = csv.reader(arquivo, delimiter=";")
+    cabecalho = next(leitor)
+    linhas_uci = [[float(valor) for valor in linha] for linha in leitor]
 
-    # Embeddings para variáveis categóricas
-    self.emb_cargo = nn.Embedding(
-        num_embeddings=num_cargos, embedding_dim=4
-    )  # Vetor dim 4
-    self.emb_setor = nn.Embedding(
-        num_embeddings=num_setores, embedding_dim=4
-    )  # Vetor dim 4
-    self.emb_beneficio = nn.Embedding(
-        num_embeddings=num_beneficios, embedding_dim=4
-    )  # Vetor dim 4
+# Histórico de demandas de saúde por ID do colaborador na base UCI:
+# Códigos UCI: 27=Fisioterapia, 13=Osteomuscular, 28=Odontologia, 23=Consulta Médica, 5/18/26=Estresse/Mental
+historico_colaborador = defaultdict(set)
+for linha in linhas_uci:
+    historico_colaborador[int(linha[0])].add(int(linha[1]))
 
-    # Dimensão total de entrada: 4 (cargo) + 4 (setor) + 4 (benefício) + 6 (numéricas) = 18
-    dim_entrada = 4 + 4 + 4 + dim_features_num
-
-    # Camadas Ocultas (MLP)
-    self.rede = nn.Sequential(
-        nn.Linear(dim_entrada, 32),
-        nn.ReLU(),
-        nn.Dropout(p=0.2),  # Regularização para evitar overfitting
-        nn.Linear(32, 16),
-        nn.ReLU(),
-        nn.Linear(16, 1),
-        nn.Sigmoid(),  # Saída: Probabilidade de adesão entre 0 e 1
+X_lista, Y_lista = [], []
+for linha in linhas_uci:
+    id_colab = int(linha[0])
+    motivos = historico_colaborador[id_colab]
+    idade, tempo_empresa, dependentes, carga_trabalho, imc = (
+        linha[8], linha[7], linha[13], linha[9], linha[19]
     )
 
-  def forward(self, cargo_id, setor_id, beneficio_id, features_num):
-    # Projeção das categorias em vetores densos
-    c_emb = self.emb_cargo(cargo_id)
-    s_emb = self.emb_setor(setor_id)
-    b_emb = self.emb_beneficio(beneficio_id)
+    # Entrada (X): 4 dados administrativos [idade, tempo_empresa, dependentes, carga_trabalho]
+    X_lista.append([idade, tempo_empresa, dependentes, carga_trabalho])
 
-    # Concatenação de todas as características
-    x = torch.cat([c_emb, s_emb, b_emb, features_num], dim=1)
-    return self.rede(x)
+    # Saída (Y): Adesão (0 ou 1) aos 5 benefícios conforme perfil e histórico real na UCI
+    Y_lista.append([
+        1.0 if (idade <= 37 and imc <= 28) else 0.0,                                               # 0: Gympass
+        1.0 if (carga_trabalho >= 265 and (5 in motivos or 18 in motivos or 26 in motivos)) else 0.0,  # 1: Apoio Psicológico
+        1.0 if ((27 in motivos or 13 in motivos) and (tempo_empresa >= 10 or idade >= 40)) else 0.0,   # 2: Ergonomia/Fisio
+        1.0 if (28 in motivos and (dependentes >= 1 or tempo_empresa >= 12)) else 0.0,             # 3: Plano Odontológico
+        1.0 if (dependentes >= 1 and (23 in motivos or 22 in motivos)) else 0.0,                   # 4: Telemedicina Familiar
+    ])
 
+X_bruto = torch.tensor(X_lista, dtype=torch.float32)
+Y = torch.tensor(Y_lista, dtype=torch.float32)
 
-# ==============================================================================
-# 2. DADOS DE TREINAMENTO SIMULADOS (vw_features_beneficio)
-# ==============================================================================
-torch.manual_seed(12)
-N_AMOSTRAS = 500
+# Divisão Temporal 80/20 ANTES da normalização (evita Data Leakage!): 592 treino / 148 teste
+corte = int(0.8 * len(X_bruto))
+X_treino_bruto, X_teste_bruto = X_bruto[:corte], X_bruto[corte:]
+Y_treino, Y_teste = Y[:corte], Y[corte:]
 
-# Variáveis Categóricas
-cargos = torch.randint(0, 20, (N_AMOSTRAS,))
-setores = torch.randint(0, 10, (N_AMOSTRAS,))
-beneficios = torch.randint(0, 8, (N_AMOSTRAS,))
+# Normalização (Z-score) calculada APENAS com a média e desvio do treino
+media = X_treino_bruto.mean(dim=0)
+desvio = X_treino_bruto.std(dim=0)
+X_treino = (X_treino_bruto - media) / desvio
+X_teste = (X_teste_bruto - media) / desvio
 
-# Variáveis Numéricas (normalizadas):
-# [tempo_empresa_meses, idade, dependentes, jornada_diaria, outros_beneficios_ativos, taxa_aceite_anterior]
-features_num = torch.randn(N_AMOSTRAS, 6)
+# 3. REDE NEURAL SIMPLES (MLP)
+torch.manual_seed(42)
+modelo = nn.Sequential(
+    nn.Linear(4, 8),  # Camada Oculta: recebe 4 dados e conecta a 8 neurônios (pesos + bias)
+    nn.ReLU(),        # Ativação: filtra sinais negativos (zera o que for < 0)
+    nn.Linear(8, 5),  # Camada de Saída: 8 neurônios decidem sobre os 5 benefícios
+    nn.Sigmoid(),     # Converte o resultado final em probabilidade (0% a 100%)
+)
 
-# Target Binário: Colaborador aderiu (1) ou não (0) ao benefício
-targets = torch.randint(0, 2, (N_AMOSTRAS, 1)).float()
+# 4. TREINAMENTO E VALIDAÇÃO (740 casos reais da UCI)
+criterio = nn.BCELoss()  # Mede o erro entre a previsão e a realidade (0 ou 1)
+otimizador = optim.Adam(modelo.parameters(), lr=0.03)  # Ajusta os pesos da rede
 
-# ==============================================================================
-# 3. TREINAMENTO DO MODELO (BCE Loss + Otimizador Adam)
-# ==============================================================================
-modelo = RecomendadorBeneficioSimples()
-criterio = nn.BCELoss()  # Binary Cross-Entropy Loss
-otimizador = optim.Adam(modelo.parameters(), lr=0.01)
+print(f"--- TREINAMENTO COM BASE REAL UCI ({len(X_treino)} treino | {len(X_teste)} teste) ---")
+for epoca in range(1, 61):
+    modelo.train()
+    otimizador.zero_grad()                              # Limpa os cálculos da rodada anterior
+    previsao_treino = modelo(X_treino)                  # Forward Pass: rede tenta adivinhar
+    erro_treino = criterio(previsao_treino, Y_treino)   # Loss Function: calcula o tamanho do erro
+    erro_treino.backward()                              # Backpropagation: descobre onde errou
+    otimizador.step()                                   # Otimizador: corrige os pesos e bias
 
-print("Iniciando treinamento da Rede Neural...")
-modelo.train()
-for epoca in range(1, 11):
-  otimizador.zero_grad()
+    if epoca % 15 == 0 or epoca == 1:
+        modelo.eval()
+        with torch.no_grad():
+            previsao_teste = modelo(X_teste)
+            erro_teste = criterio(previsao_teste, Y_teste)
+            acuracia_teste = ((previsao_teste >= 0.5).float() == Y_teste).float().mean()
+        print(
+            f"Época {epoca:02d}/60 | Loss Treino: {erro_treino.item():.4f} "
+            f"| Loss Teste: {erro_teste.item():.4f} | Acurácia Teste: {acuracia_teste.item() * 100:.1f}%"
+        )
 
-  # Forward pass
-  predicoes = modelo(cargos, setores, beneficios, features_num)
-  perda = criterio(predicoes, targets)
-
-  # Backpropagation + Gradiente Descendente
-  perda.backward()
-  otimizador.step()
-
-  if epoca % 2 == 0 or epoca == 1:
-    print(f"Época [{epoca:02d}/10] - Perda (Loss): {perda.item():.4f}")
-
-# ==============================================================================
-# 4. INFERÊNCIA OPERACIONAL: GERANDO O TOP 3 PARA O AGENTE A2
-# ==============================================================================
-print("\n" + "=" * 50)
-print("INFERÊNCIA: RANKING DE BENEFÍCIOS (FERRAMENTA AGENTE A2)")
-print("=" * 50)
-
-# Catálogo oficial de benefícios da empresa
-catalogo_beneficios = {
-    0: "Gympass / Atividade Física",
-    1: "Apoio Psicológico Online",
-    2: "Vale Refeição Flexível",
-    3: "Programa de Ergonomia e Fisioterapia",
-    4: "Plano Odontológico Familiar",
-    5: "Auxílio Creche / Educação Infantil",
-    6: "Seguro de Vida com Telemedicina",
-    7: "Desconto Farmácia e Medicamentos",
-}
-
+# Comparação com o Baseline (Métrica da Seção 10 da Documentação SinergIA v2.1)
 modelo.eval()
 with torch.no_grad():
-  # Perfil do colaborador que abriu o chat:
-  # Analista de Operações (Cargo=3, Setor=2, 2 anos de casa, 1 dependente)
-  colab_cargo = torch.tensor([3] * len(catalogo_beneficios))
-  colab_setor = torch.tensor([2] * len(catalogo_beneficios))
-  todos_beneficios = torch.tensor(list(catalogo_beneficios.keys()))
+    top3_rede = torch.topk(modelo(X_teste), k=3, dim=1).indices
+    precisao_rede = torch.gather(Y_teste, 1, top3_rede).mean().item()
 
-  # Features numéricas padronizadas para este colaborador repetidas para cada item candidato
-  colab_num = torch.tensor(
-      [[0.5, 0.2, 1.0, 0.0, 0.3, 0.8]] * len(catalogo_beneficios)
-  )
+    top3_baseline = torch.topk(Y_treino.mean(dim=0), k=3).indices.unsqueeze(0).expand(len(Y_teste), -1)
+    precisao_baseline = torch.gather(Y_teste, 1, top3_baseline).mean().item()
+    print(f"\n[Métrica de Sucesso] Precisão@3 Baseline: {precisao_baseline * 100:.1f}% -> Rede Neural: {precisao_rede * 100:.1f}%")
 
-  # A rede calcula a probabilidade de adesão para todos os benefícios
-  probabilidades = (
-      modelo(colab_cargo, colab_setor, todos_beneficios, colab_num)
-      .squeeze()
-      .numpy()
-  )
+# 5. RECOMENDAÇÃO TOP 3 (USO PELO AGENTE 2)
+print("\n--- TOP 3 BENEFÍCIOS PARA O COLABORADOR (DADOS REAIS) ---")
+modelo.eval()
+with torch.no_grad():
+    # Dados reais do colaborador: [idade (anos), tempo_empresa (anos), dependentes (qtd), carga_diaria]
+    # Descomente um perfil abaixo para testar na apresentação:
 
-  # Cria o ranking ordenando da maior probabilidade para a menor
-  ranking = []
-  for b_id, prob in zip(catalogo_beneficios.keys(), probabilidades):
-    ranking.append((catalogo_beneficios[b_id], float(prob)))
+    # Perfil A: 45 anos, 15 anos de casa, 2 filhos, carga moderada (250)
+    colaborador_bruto = torch.tensor([45.0, 15.0, 2.0, 250.0])
 
-  ranking.sort(key=lambda x: x[1], reverse=True)
+    # Perfil B: 28 anos, 2 anos de casa, sem filhos, carga de trabalho alta (320)
+    # colaborador_bruto = torch.tensor([28.0, 2.0, 0.0, 320.0])
 
-  print("Top 3 Benefícios Recomendados para envio ao Especialista A2:")
-  for posicao, (nome, probabilidade) in enumerate(ranking[:3], start=1):
-    print(f"  {posicao}º Lugar: {nome} -> Score: {probabilidade*100:.1f}%")
+    # Perfil C: 50 anos, 20 anos de casa, sem filhos, carga de trabalho elevada (290)
+    # colaborador_bruto = torch.tensor([50.0, 20.0, 0.0, 290.0])
+
+    # Normaliza os dados do colaborador usando a mesma média e desvio da base UCI
+    colaborador = (colaborador_bruto - media) / desvio
+    probabilidades = modelo(colaborador)
+
+    # Seleciona os 3 benefícios com maior probabilidade de adesão
+    top_valores, top_indices = torch.topk(probabilidades, k=3)
+
+    for pos, (idx, prob) in enumerate(zip(top_indices, top_valores), start=1):
+        print(f"{pos}º Lugar: {BENEFICIOS[idx]} ({prob.item() * 100:.1f}%)")
