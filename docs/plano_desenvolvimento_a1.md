@@ -150,7 +150,7 @@ sequenceDiagram
   - Copiar `.env.example` para `.env` e configurar `GROQ_API_KEY` e `POLITICA_EXTRAIR_CID=true`.
   - Subir o container PostgreSQL 16 + pgvector (`docker compose up -d`) e aplicar `db/schema/001_schema_inicial.sql`.
   - Instalar dependências de OCR/PDF (`Pillow`, `pymupdf` ou `pypdf`, `rapidocr-onnxruntime` ou `pytesseract`) e o pacote local (`pip install -e ".[dev]"`).
-- [ ] **Task 0.2 — Contrato `sinergia/1` do A1 (`schemas.py`):**
+- [x] **Task 0.2 — Contrato `sinergia/1` do A1 (`schemas.py` e `config.py`):**
   - Implementar os modelos Pydantic seguindo exatamente os **Anexos A, B, C.2 e D.2** da `Documentação - SinergIA v2.1.docx`:
     - **Envelope Base:** `Correlacao`, `ContextoTarefa`, `RegistroInicialCaso` (Anexo B), `SaidaMensagem`, `EventoEmitido`, `DecisaoAgente`, `ErroAgente`, `TarefaA1` e `ResultadoA1`.
     - **Modelo de Extração (`AtestadoExtraido` — Anexo D.2):**
