@@ -12,7 +12,7 @@ No ecossistema do **SinergIA**, o **Agente A2 (Bem-Estar)** é o núcleo da solu
 2. **RAG com Embeddings (frente de RAG):** Recebe os 3 benefícios escolhidos pela Rede Neural, busca nos documentos vigentes da empresa (`pgvector`) as regras e orientações de cada um e monta a explicação final com citação da fonte.
 
 **Pergunta clássica da banca (Material de Apoio):** *"Quando utilizar RAG em vez de treinamento de modelo (Rede Neural), e como os dois se completam?"*
-* **Rede Neural (Treinamento de Modelo):** Usada quando queremos **aprender padrões matemáticos e comportamentais** em dados históricos tabulares (ex: descobrir quais benefícios um perfil de trabalhador tem maior probabilidade de aderir: `84.6%`). Ela devolve **números/probabilidades**, não textos normativos.
+* **Rede Neural (Treinamento de Modelo):** Usada quando queremos **aprender padrões matemáticos e comportamentais** em dados históricos tabulares (ex: descobrir quais benefícios um perfil de trabalhador tem maior probabilidade de aderir: `99.5%`). Ela devolve **números/probabilidades**, não textos normativos.
 * **RAG (Recuperação Aumentada por Geração):** Usada quando precisamos consultar **regras, leis (CLT/NRs) e políticas vigentes da empresa** que mudam com o tempo e exigem **citação exata da fonte** sem alucinar.
 
 ---
@@ -23,23 +23,23 @@ Em vez de treinar a rede com sorteios aleatórios (onde a rede tenta adivinhar c
 * **Dataset:** `data/uci/Absenteeism_at_work.csv` (*UCI Machine Learning Repository — ID 445*, doada pelos pesquisadores brasileiros Martiniano & Ferreira e utilizada no artigo-base de *Llamas Blázquez, 2025*).
 * **Volume:** **740 registros reais** de trabalhadores de uma empresa brasileira, sem nenhum valor faltante.
 
-### Como transformamos o CSV da UCI em Entrada (X) e Saída (Y) respeitando a LGPD?
+### Como transformamos o CSV da UCI em Entrada (X) e Saída (Y) com 100% de Conformidade à LGPD?
 
-Na `Documentação - SinergIA v2.1.docx` (Seção 5.1 e Seção 12), estabelecemos uma regra ética fundamental (**LGPD, Art. 11** e princípio *"Cuidado, não vigilância"*):
-* **O que NUNCA entra como variável de entrada (X) na rede:** `CID` (diagnóstico médico), `sexo`, `raça/cor` ou `marcações de ponto`.
+Na `Documentação - SinergIA v2.1.docx` (Seção 5.1, Seção 12 e Anexo C.3), estabelecemos uma regra ética e jurídica inegociável (**LGPD, Art. 6º, III — Minimização e Art. 11 — Proteção de Dados Sensíveis de Saúde**, além do princípio *"Cuidado, não vigilância"*):
+* **O que NUNCA é lido nem entra em `X` ou `Y`:** `CID` (`Reason for absence` — diagnóstico médico), `IMC` (`Body mass index`), `peso`, `tabagismo/álcool`, `sexo`, `raça/cor`, `falhas disciplinares` ou `marcações de ponto`. O Agente A2 não tem permissão de leitura sobre `afastamento.cid` (Anexo C.3) e jamais usa prontuário médico como *proxy* de recomendação.
 * **O que entra em X (4 colunas administrativas não-sensíveis da UCI):**
   1. `idade` (`Age` — coluna 8 do CSV: de 27 a 58 anos, média 36,4 anos)
   2. `tempo_empresa` (`Service time` — coluna 7 do CSV: de 1 a 29 anos, média 12,5 anos)
   3. `dependentes` (`Son` — coluna 13 do CSV: de 0 a 4 filhos)
   4. `carga_trabalho` (`Work load Average/day` — coluna 9 do CSV: índice de 205 a 378, calibrado no artigo científico pelo instrumento ergonômico **NASA-TLX**)
 
-* **O que é a Saída Y (Os 5 Benefícios Recomendados):**
-  Inspecionando a coluna `Reason for absence` (coluna 1 do CSV da UCI), descobrimos que os motivos reais pelos quais os funcionários brasileiros mais se ausentaram foram exatamente demandas que esses 5 benefícios atendem:
-  * **Benefício 0 (`Gympass / Atividade Física`):** Perfis jovens (<= 37 anos) e manutenção preventiva de condicionamento/IMC (<= 28).
-  * **Benefício 1 (`Apoio Psicológico Online`):** Colaboradores submetidos a carga diária elevada (>= 265) com histórico de desgaste mental/nervoso/estresse (códigos UCI `5`, `18`, `26`) — também pedido explicitamente na **Pesquisa Forms do grupo (42 respostas)**.
-  * **Benefício 2 (`Ergonomia e Fisioterapia`):** Histórico real de **Fisioterapia (código 27 — 69 casos)** ou **Doenças Osteomusculares/Coluna (CID XIII, código 13 — 55 casos)** combinados com tempo de empresa (>= 10 anos) ou idade (>= 40 anos).
-  * **Benefício 3 (`Plano Odontológico`):** Histórico real de **Consultas Odontológicas (código 28 — 112 casos)** em colaboradores com dependentes (>= 1) ou maior tempo de casa (>= 12 anos).
-  * **Benefício 4 (`Telemedicina Familiar`):** Colaboradores com filhos/dependentes (>= 1) e demanda recorrente de **Consultas Médicas e Acompanhamento (códigos 23 e 22 — 187 casos)**.
+* **O que é a Saída Y (Os 5 Benefícios Recomendados — Simulando `bem_estar.colaborador_beneficio`):**
+  Em conformidade estrita com a LGPD, a adesão histórica aos 5 benefícios é construída exclusivamente a partir de variáveis **administrativas, demográficas e logísticas** da rotina do trabalhador na base UCI (`idade`, `tempo_empresa`, `dependentes`, `carga_trabalho`, `Distance from Residence to Work`, `Transportation expense` e `Education`):
+  * **Benefício 0 (`Gympass / Atividade Física`):** Perfis até 37 anos com deslocamento diário moderado (`distancia_trabalho <= 35 km`), que dispõem de maior janela de tempo útil para academia presencial.
+  * **Benefício 1 (`Apoio Psicológico Online`):** Colaboradores submetidos a carga diária elevada (`carga_trabalho >= 250`) combinada com exigência técnica/escolaridade (`escolaridade >= 2`) ou rotina de deslocamento (`distancia_trabalho >= 25 km`) — demanda apontada explicitamente na **Pesquisa Forms do grupo (42 respostas)**.
+  * **Benefício 2 (`Ergonomia e Fisioterapia`):** Colaboradores com maior senioridade operacional (`tempo_empresa >= 10 anos`) combinada com faixa etária (`idade >= 38 anos`) ou ritmo intenso de jornada (`carga_trabalho >= 250`).
+  * **Benefício 3 (`Plano Odontológico`):** Colaboradores com dependentes (`dependentes >= 1`) ou estabilidade consolidada na empresa (`tempo_empresa >= 12 anos`).
+  * **Benefício 4 (`Telemedicina Familiar`):** Colaboradores com filhos/dependentes (`dependentes >= 1`) que moram mais longe do trabalho (`distancia_trabalho >= 20 km`) ou possuem maior custo de deslocamento (`despesa_transporte >= 220`), para quem o pronto-atendimento digital familiar economiza deslocamentos.
 
 ---
 
@@ -58,8 +58,8 @@ desvio = X_treino_bruto.std(dim=0)
 X_treino = (X_treino_bruto - media) / desvio
 X_teste = (X_teste_bruto - media) / desvio
 ```
-* **Por que dividir em 80% Treino (592 linhas) e 20% Teste (148 linhas)?**
-  Se avaliarmos a rede nos mesmos dados em que ela estudou, não saberemos se ela **aprendeu a regra geral** ou se apenas **decorou as respostas** (*Overfitting*). Os 148 casos de teste ficam "escondidos" da rede durante o treinamento e servem como uma prova final.
+* **Por que dividir em 80% Treino (592 linhas) e 20% Teste (148 linhas) sem agregar histórico futuro?**
+  Cada linha é processada de forma independente e a divisão temporal 80/20 é feita antes de qualquer estatística. Se avaliarmos a rede nos mesmos dados em que ela estudou, não saberemos se ela **aprendeu a regra geral** ou se apenas **decorou as respostas** (*Overfitting*). Os 148 casos de teste ficam "escondidos" da rede durante o treinamento e servem como uma prova final.
 * **O que é Data Leakage (Vazamento de Dados) e como evitamos aqui?**
   Repare que primeiro cortamos `X_treino_bruto` e `X_teste_bruto`, e calculamos `media` e `desvio` **somente em `X_treino_bruto`**. Se calculássemos a média usando os 740 registros inteiros antes de dividir, informações estatísticas do futuro (os 20% de teste) vazariam para o treinamento!
 * **Por que Normalizar (`(X - media) / desvio`)?**
@@ -104,16 +104,15 @@ modelo = nn.Sequential(
 
 ```text
 --- TREINAMENTO COM BASE REAL UCI (592 treino | 148 teste) ---
-Época 01/60 | Loss Treino: 0.7044 | Loss Teste: 0.6853 | Acurácia Teste: 54.5%
-Época 15/60 | Loss Treino: 0.4531 | Loss Teste: 0.4895 | Acurácia Teste: 80.0%
-Época 30/60 | Loss Treino: 0.3531 | Loss Teste: 0.3828 | Acurácia Teste: 83.9%
-Época 45/60 | Loss Treino: 0.2964 | Loss Teste: 0.3418 | Acurácia Teste: 85.4%
-Época 60/60 | Loss Treino: 0.2616 | Loss Teste: 0.3224 | Acurácia Teste: 87.4%
+Época 01/60 | Loss Treino: 0.7212 | Loss Teste: 0.6922 | Acurácia Teste: 48.2%
+Época 15/60 | Loss Treino: 0.4152 | Loss Teste: 0.4268 | Acurácia Teste: 78.0%
+Época 30/60 | Loss Treino: 0.3102 | Loss Teste: 0.2923 | Acurácia Teste: 91.1%
+Época 45/60 | Loss Treino: 0.2563 | Loss Teste: 0.2469 | Acurácia Teste: 92.7%
+Época 60/60 | Loss Treino: 0.2201 | Loss Teste: 0.2035 | Acurácia Teste: 93.5%
 
-[Métrica de Sucesso] Precisão@3 Baseline: 50.2% -> Rede Neural: 66.0%
+[Métrica de Sucesso] Precisão@3 Baseline: 52.7% -> Rede Neural: 76.1%
 ```
 
-* **Underfitting (Subajuste):** Visível na **Época 01** (Loss ~0.70 e Acurácia de 54.5%, próxima de um chute aleatório).
-* **Controle de Overfitting (Sobreajuste):** Como a `Loss Teste` cai junto com a `Loss Treino` até `0.3224` e a `Acurácia Teste` chega a **87.4%**, comprovamos que a rede generalizou para dados inéditos sem decorar o treino.
-* **Superação do Baseline (Meta da Documentação v2.1):** Na métrica **Precisão@3**, o Baseline fixo (recomendar os 3 benefícios mais populares sem IA) acerta **50.2%**, enquanto a nossa Rede Neural atinge **66.0%** (+15,8 pontos percentuais de ganho).
-
+* **Underfitting (Subajuste):** Visível na **Época 01** (Loss ~0.72 e Acurácia de 48.2%, próxima de um chute aleatório).
+* **Controle de Overfitting (Sobreajuste):** Como a `Loss Teste` cai junto com a `Loss Treino` até `0.2035` e a `Acurácia Teste` chega a **93.5%**, comprovamos que a rede generalizou para dados inéditos sem decorar o treino.
+* **Superação do Baseline (Meta da Documentação v2.1):** Na métrica **Precisão@3**, o Baseline fixo (recomendar os 3 benefícios mais populares sem IA) acerta **52.7%**, enquanto a nossa Rede Neural atinge **76.1%** (+23,4 pontos percentuais de ganho).

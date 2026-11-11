@@ -1,5 +1,4 @@
 import csv
-from collections import defaultdict
 from pathlib import Path
 import torch
 import torch.nn as nn
@@ -21,30 +20,29 @@ with open(caminho_csv, mode="r", encoding="utf-8") as arquivo:
     cabecalho = next(leitor)
     linhas_uci = [[float(valor) for valor in linha] for linha in leitor]
 
-# Histórico de demandas de saúde por ID do colaborador na base UCI:
-# Códigos UCI: 27=Fisioterapia, 13=Osteomuscular, 28=Odontologia, 23=Consulta Médica, 5/18/26=Estresse/Mental
-historico_colaborador = defaultdict(set)
-for linha in linhas_uci:
-    historico_colaborador[int(linha[0])].add(int(linha[1]))
-
+# Construção estritamente compatível com a LGPD (Art. 11) e Seção 5.1 da Documentação v2.1:
+# NENHUM dado sensível de saúde (CID/Reason for absence, IMC/peso) ou punitivo entra em X ou Y.
+# Usamos apenas dados administrativos, demográficos e logísticos da base UCI.
 X_lista, Y_lista = [], []
 for linha in linhas_uci:
-    id_colab = int(linha[0])
-    motivos = historico_colaborador[id_colab]
-    idade, tempo_empresa, dependentes, carga_trabalho, imc = (
-        linha[8], linha[7], linha[13], linha[9], linha[19]
+    idade, tempo_empresa, dependentes, carga_trabalho = (
+        linha[8], linha[7], linha[13], linha[9]
+    )
+    distancia_trabalho, despesa_transporte, escolaridade = (
+        linha[6], linha[5], linha[12]
     )
 
     # Entrada (X): 4 dados administrativos [idade, tempo_empresa, dependentes, carga_trabalho]
     X_lista.append([idade, tempo_empresa, dependentes, carga_trabalho])
 
-    # Saída (Y): Adesão (0 ou 1) aos 5 benefícios conforme perfil e histórico real na UCI
+    # Saída (Y): Adesão histórica (0 ou 1) aos 5 benefícios em bem_estar.colaborador_beneficio
+    # derivada apenas de fatores administrativos/rotina (sem CID, sem IMC e sem dados clínicos)
     Y_lista.append([
-        1.0 if (idade <= 37 and imc <= 28) else 0.0,                                               # 0: Gympass
-        1.0 if (carga_trabalho >= 265 and (5 in motivos or 18 in motivos or 26 in motivos)) else 0.0,  # 1: Apoio Psicológico
-        1.0 if ((27 in motivos or 13 in motivos) and (tempo_empresa >= 10 or idade >= 40)) else 0.0,   # 2: Ergonomia/Fisio
-        1.0 if (28 in motivos and (dependentes >= 1 or tempo_empresa >= 12)) else 0.0,             # 3: Plano Odontológico
-        1.0 if (dependentes >= 1 and (23 in motivos or 22 in motivos)) else 0.0,                   # 4: Telemedicina Familiar
+        1.0 if (idade <= 37 and distancia_trabalho <= 35) else 0.0,                                    # 0: Gympass
+        1.0 if (carga_trabalho >= 250 and (escolaridade >= 2 or distancia_trabalho >= 25)) else 0.0,   # 1: Apoio Psicológico
+        1.0 if (tempo_empresa >= 10 and (idade >= 38 or carga_trabalho >= 250)) else 0.0,              # 2: Ergonomia/Fisio
+        1.0 if (dependentes >= 1 or tempo_empresa >= 12) else 0.0,                                     # 3: Plano Odontológico
+        1.0 if (dependentes >= 1 and (distancia_trabalho >= 20 or despesa_transporte >= 220)) else 0.0,# 4: Telemedicina Familiar
     ])
 
 X_bruto = torch.tensor(X_lista, dtype=torch.float32)
