@@ -61,3 +61,4 @@ class A1Config:
 def obter_config_a1() -> A1Config:
     """Retorna a configuração ativa do Agente 1."""
     return A1Config.from_env()
+

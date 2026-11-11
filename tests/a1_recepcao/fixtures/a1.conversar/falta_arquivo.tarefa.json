@@ -1,0 +1,43 @@
+{
+  "protocolo": "sinergia/1",
+  "id_mensagem": "t-105-01",
+  "tipo": "TAREFA",
+  "acao": "a1.conversar",
+  "origem": "A0",
+  "destino": "A1",
+  "correlacao": {
+    "id_caso": 105,
+    "thread_id": "chat-42-105",
+    "id_tarefa": "t-105-01"
+  },
+  "contexto": {
+    "id_colaborador": 42,
+    "perfil": "colaborador",
+    "canal": "chat",
+    "data_hora": "2026-11-09T09:05:10-03:00"
+  },
+  "registro_inicial": {
+    "id_caso": 105,
+    "thread_id": "chat-42-105",
+    "aberto_em": "2026-11-09T09:05:00-03:00",
+    "canal": "chat",
+    "id_colaborador": 42,
+    "nome": "Carla S.",
+    "matricula": "00123",
+    "id_area": 2,
+    "id_setor": 7,
+    "id_cargo": 15,
+    "jornada_inicio": "07:00",
+    "jornada_fim": "16:00",
+    "municipio": "Campinas",
+    "uf": "SP",
+    "tipo_solicitacao": "atestado_medico",
+    "inicio_informado": "2026-11-09",
+    "dias_informados": 5,
+    "tem_documento": false
+  },
+  "payload": {
+    "texto": "Preciso enviar um atestado médico de 5 dias.",
+    "historico_resumo": null
+  }
+}

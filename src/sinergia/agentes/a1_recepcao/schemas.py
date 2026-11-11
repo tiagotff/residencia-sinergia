@@ -1,8 +1,8 @@
-"""Contratos Pydantic do Agente 1 (A1 — Recepção e Processamento).
+"""Contratos Pydantic e JSON Schema do Agente 1 (A1 — Recepção e Processamento).
 
 Implementa o protocolo `sinergia/1` e os payloads das 4 ações do A1 conforme
 definido em `docs/Documentação - SinergIA v2.1.docx` (Seção 5.3 e Anexos A, B,
-C.2, D.1, D.2, E.2 e F):
+C.2, D.1, D.2, E.2, F e G) e as restrições de `db/schema/001_schema_inicial.sql`:
 
 - `a1.conversar`
 - `a1.processar_documento`
@@ -16,7 +16,7 @@ from datetime import date, datetime
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 PROTOCOLO_SINERGIA = "sinergia/1"
 
@@ -43,6 +43,9 @@ EstadoCasoAfastamento = Literal[
 StatusAtestadoDB = Literal["PENDENTE", "CONFIRMADO", "REJEITADO"]
 OrigemDadosAtestado = Literal["IA", "MANUAL"]
 LegibilidadeDocumento = Literal["ok", "ilegivel"]
+TipoDocumentoAfastamento = Literal[
+    "atestado_medico", "declaracao_comparecimento", "outro"
+]
 
 
 # ============================================================================
@@ -59,13 +62,15 @@ class ResultadoOCR(BaseModel):
         ..., description="Caminho/URI do arquivo no armazenamento privado."
     )
     mime: str | None = Field(
-        default=None, description="Tipo MIME do arquivo (ex: image/png, application/pdf)."
+        default=None,
+        description="Tipo MIME do arquivo (ex: image/png, application/pdf).",
     )
     sha256: str | None = Field(
         default=None, description="Hash SHA-256 calculado do arquivo."
     )
     texto_extraido: str = Field(
-        default="", description="Texto bruto extraído via OCR ou camada de texto do PDF."
+        default="",
+        description="Texto bruto extraído via OCR ou camada de texto do PDF.",
     )
     confianca_media: float | None = Field(
         default=None,
@@ -84,31 +89,68 @@ class PeriodoAfastamento(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    inicio: date | None = Field(default=None, description="Data de início do afastamento.")
-    fim: date | None = Field(default=None, description="Data de término do afastamento.")
+    inicio: date | None = Field(
+        default=None, description="Data de início do afastamento."
+    )
+    fim: date | None = Field(
+        default=None, description="Data de término do afastamento."
+    )
+
+    @property
+    def dias_calculados(self) -> int | None:
+        """Calcula a quantidade inclusiva de dias do período (`(fim - inicio).days + 1`)."""
+        if self.inicio is not None and self.fim is not None:
+            return (self.fim - self.inicio).days + 1
+        return None
 
 
 class ProfissionalExtraido(BaseModel):
-    """Dados do profissional de saúde extraídos do atestado (Anexo D.2)."""
+    """Dados do profissional de saúde extraídos do atestado (Anexo D.2 e 001_schema_inicial.sql)."""
 
     model_config = ConfigDict(extra="allow")
 
     conselho: str | None = Field(
-        default=None, description="Sigla do conselho profissional (ex: CRM, CRO, CRP)."
+        default=None,
+        description="Sigla do conselho profissional (ex: CRM, CRO, CRP).",
     )
     numero: str | None = Field(
         default=None, description="Número de registro no conselho."
     )
     uf: str | None = Field(
-        default=None, description="Sigla da UF do registro profissional (2 letras)."
+        default=None,
+        description="Sigla da UF do registro profissional (2 letras, ex: SP).",
     )
     nome: str | None = Field(
         default=None, description="Nome do profissional de saúde (quando legível)."
     )
 
+    @field_validator("conselho", mode="before")
+    @classmethod
+    def _normalizar_conselho(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        texto = str(v).strip().upper()
+        return texto or None
+
+    @field_validator("numero", mode="before")
+    @classmethod
+    def _normalizar_numero(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        texto = str(v).strip()
+        return texto or None
+
+    @field_validator("uf", mode="before")
+    @classmethod
+    def _normalizar_uf(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        texto = str(v).strip().upper()
+        return texto or None
+
 
 class AtestadoExtraido(BaseModel):
-    """Estrutura oficial de `atestado_extraido` (Anexo C.2 e D.2).
+    """Estrutura oficial de `atestado_extraido` (Anexo C.2, D.2 e E.2).
 
     Utilizada também como schema de saída estruturada (`.with_structured_output`)
     do LLM no módulo `extrator_llm.py`.
@@ -121,7 +163,8 @@ class AtestadoExtraido(BaseModel):
         description="'ok' se o documento é um atestado legível; 'ilegivel' caso contrário.",
     )
     nome_no_documento: str | None = Field(
-        default=None, description="Nome do paciente conforme impresso/escrito no atestado."
+        default=None,
+        description="Nome do paciente conforme impresso/escrito no atestado.",
     )
     periodo: PeriodoAfastamento = Field(
         default_factory=PeriodoAfastamento,
@@ -141,6 +184,57 @@ class AtestadoExtraido(BaseModel):
     municipio: str | None = Field(
         default=None, description="Município de emissão do atestado."
     )
+    confianca_campos: dict[str, float] | None = Field(
+        default=None,
+        exclude_if=lambda v: v is None,
+        description="Confiança por campo (0.0 a 1.0) para aplicar o limiar de 0,8 do Anexo E.2.",
+    )
+
+    @field_validator("cid", mode="before")
+    @classmethod
+    def _normalizar_cid(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        texto = str(v).strip().upper()
+        return texto or None
+
+    def aplicar_politica_e_limiar(
+        self,
+        *,
+        extrair_cid: bool = True,
+        limiar_confianca: float = 0.8,
+    ) -> AtestadoExtraido:
+        """Aplica a Política de CID (Anexo G) e o limiar de confiança por campo (Anexo E.2).
+
+        Campos cuja confiança em `confianca_campos` seja inferior a `limiar_confianca`
+        são esvaziados (`None`) para que o A1 jamais adivinhe valores duvidosos.
+        """
+        copia = self.model_copy(deep=True)
+        if not extrair_cid:
+            copia.cid = None
+
+        if copia.confianca_campos:
+            c = copia.confianca_campos
+            if c.get("nome_no_documento", 1.0) < limiar_confianca:
+                copia.nome_no_documento = None
+            if c.get("periodo.inicio", c.get("inicio", 1.0)) < limiar_confianca:
+                copia.periodo.inicio = None
+            if c.get("periodo.fim", c.get("fim", 1.0)) < limiar_confianca:
+                copia.periodo.fim = None
+            if c.get("data_emissao", 1.0) < limiar_confianca:
+                copia.data_emissao = None
+            if c.get("profissional.conselho", c.get("conselho", 1.0)) < limiar_confianca:
+                copia.profissional.conselho = None
+            if c.get("profissional.numero", c.get("numero", 1.0)) < limiar_confianca:
+                copia.profissional.numero = None
+            if c.get("profissional.uf", c.get("uf", 1.0)) < limiar_confianca:
+                copia.profissional.uf = None
+            if c.get("cid", 1.0) < limiar_confianca:
+                copia.cid = None
+            if c.get("municipio", 1.0) < limiar_confianca:
+                copia.municipio = None
+
+        return copia
 
 
 class DivergenciaCampo(BaseModel):
@@ -219,8 +313,13 @@ class PayloadConfirmarTarefa(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    atestado_confirmado: dict[str, Any] | AtestadoExtraido = Field(
-        ..., description="Campos confirmados ou corrigidos pelo colaborador."
+    atestado_confirmado: AtestadoExtraido = Field(
+        ...,
+        description=(
+            "Campos confirmados ou corrigidos pelo colaborador (aceita tanto "
+            "objeto parcial com `periodo`/`data_emissao` como no Anexo D.1 quanto "
+            "todos os campos de `AtestadoExtraido`)."
+        ),
     )
     campos_corrigidos: list[str] = Field(
         default_factory=list,
@@ -255,7 +354,8 @@ class PayloadBaixaFisicaTarefa(BaseModel):
 
     id_atestado: int
     recebido_fisico_por: str | int = Field(
-        ..., description="Identificador ou login do usuário de RH que recebeu o original."
+        ...,
+        description="Identificador ou login do usuário de RH que recebeu o original.",
     )
     recebido_fisico_em: datetime | str = Field(
         ..., description="Data/hora ISO 8601 do recebimento do atestado físico."
@@ -297,7 +397,9 @@ class ContextoTarefa(BaseModel):
         default="colaborador",
         description="Perfil autenticado no A0 (colaborador, rh, gestor, tst, auditor).",
     )
-    canal: str = Field(default="chat", description="Canal de origem (chat, e-mail, mensagem).")
+    canal: str = Field(
+        default="chat", description="Canal de origem (chat, e-mail, mensagem)."
+    )
     data_hora: datetime | str
 
 
@@ -380,7 +482,7 @@ class DecisaoAgente(BaseModel):
 
     motivo: str
     usou_llm: bool
-    confianca: float | None = None
+    confianca: float | None = Field(default=None, ge=0.0, le=1.0)
     modelo: str | None = None
 
 
@@ -405,7 +507,9 @@ class TarefaA1(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     protocolo: Literal["sinergia/1"] = PROTOCOLO_SINERGIA
-    id_mensagem: str = Field(..., description="Identificador único da mensagem (idempotência).")
+    id_mensagem: str = Field(
+        ..., description="Identificador único da mensagem (idempotência)."
+    )
     tipo: Literal["TAREFA"] = "TAREFA"
     acao: AcaoA1
     origem: Literal["A0"] = "A0"
@@ -461,8 +565,32 @@ class ResultadoA1(BaseModel):
     @model_validator(mode="after")
     def _validar_erro_obrigatorio(self) -> ResultadoA1:
         if self.status == "ERRO" and self.erro is None:
-            raise ValueError("Quando status == 'ERRO', o bloco 'erro' deve ser preenchido.")
+            raise ValueError(
+                "Quando status == 'ERRO', o bloco 'erro' deve ser preenchido."
+            )
         return self
+
+    def validar_payload_acao(
+        self,
+    ) -> (
+        PayloadConversarResultado
+        | PayloadProcessarDocumentoResultado
+        | PayloadConfirmarValidoResultado
+        | PayloadConfirmarInvalidoResultado
+        | PayloadBaixaFisicaResultado
+    ):
+        """Converte e valida `self.payload` do resultado conforme `self.acao`."""
+        if self.acao == "a1.conversar":
+            return PayloadConversarResultado.model_validate(self.payload)
+        if self.acao == "a1.processar_documento":
+            return PayloadProcessarDocumentoResultado.model_validate(self.payload)
+        if self.acao == "a1.confirmar":
+            if self.estado_proposto == "VALIDADO" or "id_atestado" in self.payload:
+                return PayloadConfirmarValidoResultado.model_validate(self.payload)
+            return PayloadConfirmarInvalidoResultado.model_validate(self.payload)
+        if self.acao == "a1.registrar_baixa_fisica":
+            return PayloadBaixaFisicaResultado.model_validate(self.payload)
+        raise ValueError(f"Ação desconhecida no ResultadoA1: {self.acao}")
 
     @classmethod
     def a_partir_da_tarefa(
@@ -480,7 +608,7 @@ class ResultadoA1(BaseModel):
     ) -> ResultadoA1:
         """Constrói um envelope `ResultadoA1` copiando `acao`, `correlacao` e `em_resposta_a`."""
         payload_dict = (
-            payload.model_dump(mode="json")
+            payload.model_dump(mode="json", exclude_none=False)
             if isinstance(payload, BaseModel)
             else (payload or {})
         )
@@ -511,3 +639,21 @@ class ResultadoA1(BaseModel):
                 else ErroAgente.model_validate(erro)
             ),
         )
+
+
+def exportar_json_schemas_a1() -> dict[str, dict[str, Any]]:
+    """Exporta os JSON Schemas oficiais do Agente 1 conforme Anexo A e Anexo F."""
+    return {
+        "TarefaA1": TarefaA1.model_json_schema(),
+        "ResultadoA1": ResultadoA1.model_json_schema(),
+        "AtestadoExtraido": AtestadoExtraido.model_json_schema(),
+        "a1.conversar.tarefa": PayloadConversarTarefa.model_json_schema(),
+        "a1.conversar.resultado": PayloadConversarResultado.model_json_schema(),
+        "a1.processar_documento.tarefa": PayloadProcessarDocumentoTarefa.model_json_schema(),
+        "a1.processar_documento.resultado": PayloadProcessarDocumentoResultado.model_json_schema(),
+        "a1.confirmar.tarefa": PayloadConfirmarTarefa.model_json_schema(),
+        "a1.confirmar.resultado.valido": PayloadConfirmarValidoResultado.model_json_schema(),
+        "a1.confirmar.resultado.invalido": PayloadConfirmarInvalidoResultado.model_json_schema(),
+        "a1.registrar_baixa_fisica.tarefa": PayloadBaixaFisicaTarefa.model_json_schema(),
+        "a1.registrar_baixa_fisica.resultado": PayloadBaixaFisicaResultado.model_json_schema(),
+    }

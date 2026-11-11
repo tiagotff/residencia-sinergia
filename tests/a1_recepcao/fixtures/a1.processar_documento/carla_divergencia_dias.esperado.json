@@ -1,0 +1,61 @@
+{
+  "protocolo": "sinergia/1",
+  "id_mensagem": "r-105-02",
+  "tipo": "RESULTADO",
+  "acao": "a1.processar_documento",
+  "origem": "A1",
+  "destino": "A0",
+  "em_resposta_a": "t-105-02",
+  "correlacao": {
+    "id_caso": 105,
+    "thread_id": "chat-42-105",
+    "id_tarefa": "t-105-02"
+  },
+  "status": "PRECISA_HUMANO",
+  "estado_proposto": "RECEBIDO",
+  "payload": {
+    "atestado_extraido": {
+      "legibilidade": "ok",
+      "nome_no_documento": "Carla Souza",
+      "periodo": {
+        "inicio": "2026-11-09",
+        "fim": "2026-11-11"
+      },
+      "data_emissao": "2026-11-09",
+      "profissional": {
+        "conselho": "CRM",
+        "numero": "123456",
+        "uf": "SP"
+      },
+      "cid": null,
+      "municipio": "Campinas"
+    },
+    "divergencias": [
+      {
+        "campo": "dias",
+        "no_documento": 3,
+        "informado": 5
+      }
+    ]
+  },
+  "saidas": [
+    {
+      "tipo": "mensagem",
+      "texto": "Li no atestado 3 dias (09/11 a 11/11), mas você informou 5. Qual está certo?"
+    }
+  ],
+  "eventos": [
+    {
+      "tipo": "atestado.extraido",
+      "dados": {
+        "id_caso": 105
+      }
+    }
+  ],
+  "decisao": {
+    "motivo": "documento legivel extraido pelo LLM com divergencia de dias",
+    "usou_llm": true,
+    "confianca": 0.92,
+    "modelo": "openai/gpt-oss-120b"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "protocolo": "sinergia/1",
+  "id_mensagem": "r-105-03",
+  "tipo": "RESULTADO",
+  "acao": "a1.confirmar",
+  "origem": "A1",
+  "destino": "A0",
+  "em_resposta_a": "0b9e7d1a-5c2f-4e8b-a1d3-6f7e8c9d0a12",
+  "correlacao": {
+    "id_caso": 105,
+    "thread_id": "chat-42-105",
+    "id_tarefa": "t-105-03"
+  },
+  "status": "OK",
+  "estado_proposto": "VALIDADO",
+  "payload": {
+    "id_atestado": 311,
+    "status_atestado": "CONFIRMADO",
+    "origem": "IA",
+    "prazo_entrega_fisica": "2026-11-16"
+  },
+  "saidas": [
+    {
+      "tipo": "mensagem",
+      "texto": "Pronto, seu atestado de 09/11 a 11/11 foi registrado. Entregue o original ao RH até 16/11."
+    }
+  ],
+  "eventos": [
+    {
+      "tipo": "atestado.registrado",
+      "dados": {
+        "id_caso": 105,
+        "id_atestado": 311,
+        "dias": 3
+      }
+    }
+  ],
+  "decisao": {
+    "motivo": "regras ok; colaborador confirmou o período do documento",
+    "usou_llm": false
+  }
+}

@@ -34,6 +34,8 @@ from sinergia.agentes.a1_recepcao.schemas import (
     StatusAtestadoDB,
     StatusEnvelopeResultado,
     TarefaA1,
+    TipoDocumentoAfastamento,
+    exportar_json_schemas_a1,
 )
 
 __all__ = [
@@ -70,5 +72,7 @@ __all__ = [
     "StatusAtestadoDB",
     "StatusEnvelopeResultado",
     "TarefaA1",
+    "TipoDocumentoAfastamento",
+    "exportar_json_schemas_a1",
     "obter_config_a1",
 ]
