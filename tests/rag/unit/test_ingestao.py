@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 from sinergia.rag.ingestao import ingerir_documento, ingerir_diretorio_mocks, mapear_mock_para_metadados
 
 CAMINHO_MOCKS = os.path.join(
-    os.path.dirname(__file__), "..", "..", "data", "mocks"
+    os.path.dirname(__file__), "..", "..", "..", "data", "rag", "mocks"
 )
 
 

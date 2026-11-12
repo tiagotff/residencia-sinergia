@@ -8,7 +8,7 @@ from sinergia.rag.chunking import (
 )
 
 CAMINHO_MOCKS = os.path.join(
-    os.path.dirname(__file__), "..", "..", "data", "mocks"
+    os.path.dirname(__file__), "..", "..", "..", "data", "rag", "mocks"
 )
 
 
