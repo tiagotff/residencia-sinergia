@@ -19,6 +19,9 @@ dependencies = [
     "argon2-cffi",
     "pyjwt",
     "onnxruntime",
+    "sentence-transformers",
+    "pymupdf",
+    "pgvector",
 ]
 
 [project.optional-dependencies]
