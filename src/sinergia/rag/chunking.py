@@ -9,9 +9,9 @@ from pydantic import BaseModel, Field
 from sinergia.rag.limpeza import sanitizar_texto
 
 try:
-    import fitz  # PyMuPDF
+    import pymupdf
 except ImportError:
-    fitz = None
+    pymupdf = None
 
 
 class ChunkDoc(BaseModel):
@@ -31,13 +31,13 @@ def extrair_texto_pdf(caminho_pdf: str) -> List[Tuple[int, str]]:
     if not os.path.exists(caminho_pdf):
         raise FileNotFoundError(f"Arquivo PDF não encontrado: {caminho_pdf}")
 
-    if fitz is not None:
-        doc = fitz.open(caminho_pdf)
-        paginas = []
-        for i, pagina in enumerate(doc, start=1):
-            texto = pagina.get_text()
-            paginas.append((i, texto))
-        return paginas
+    if pymupdf is not None:
+        with pymupdf.open(caminho_pdf) as doc:
+            paginas = []
+            for i, pagina in enumerate(doc, start=1):
+                texto = pagina.get_text()
+                paginas.append((i, texto))
+            return paginas
 
     # Fallback nativo: descompressão de streams PDF via zlib
     with open(caminho_pdf, "rb") as f:
