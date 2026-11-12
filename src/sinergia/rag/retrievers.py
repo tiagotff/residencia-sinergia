@@ -203,12 +203,15 @@ class BuscadorHibrido:
 
     def buscar(self, query: str, id_base: int) -> ContextoRAG:
         """Executa busca híbrida combinada com RRF (k=60) e retorna o ContextoRAG com top-4 trechos."""
-        # Tentar busca via banco de dados
-        resultado_banco = self._buscar_banco(query, id_base)
-        if resultado_banco is not None:
-            densos, lexicos = resultado_banco
-        else:
+        # Se houver trechos em memória (modo mock/testes locais), prioriza a busca em memória
+        if self._trechos_memoria:
             densos, lexicos = self._buscar_memoria(query, id_base)
+        else:
+            resultado_banco = self._buscar_banco(query, id_base)
+            if resultado_banco is not None:
+                densos, lexicos = resultado_banco
+            else:
+                densos, lexicos = self._buscar_memoria(query, id_base)
 
         top_trechos = calcular_rrf(densos, lexicos, k=self.k_rrf, top_k=self.top_k)
 

@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from sinergia.rag.interfaces import MetadadosTrecho, TrechoRecuperado, ContextoRAG
 from sinergia.rag.retrievers import calcular_rrf, BuscadorHibrido
 
@@ -106,7 +106,8 @@ class TestRetrievers(unittest.TestCase):
         fundidos = calcular_rrf(densos, lexicos, k=60, top_k=4)
         self.assertEqual(len(fundidos), 4)
 
-    def test_buscador_hibrido_com_mock(self):
+    @patch.object(BuscadorHibrido, "_buscar_banco", return_value=None)
+    def test_buscador_hibrido_com_mock(self, mock_buscar_banco):
         mock_embedding = MagicMock()
         mock_embedding.gerar_embedding.return_value = [0.1] * 768
 

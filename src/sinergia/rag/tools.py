@@ -5,6 +5,10 @@ from sinergia.rag.retrievers import BuscadorHibrido
 
 try:
     from crewai.tools import tool
+    from crewai.tools.base_tool import Tool
+
+    if "__call__" not in Tool.__dict__:
+        Tool.__call__ = lambda self, *args, **kwargs: self.run(*args, **kwargs)
 except ImportError:
     # Fallback transparente quando crewai não estiver instalado no ambiente
     def tool(name_or_func: Optional[Callable] = None):
