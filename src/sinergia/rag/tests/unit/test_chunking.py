@@ -1,5 +1,6 @@
 import os
 import unittest
+from unittest.mock import MagicMock, patch
 from sinergia.rag.chunking import (
     ChunkDoc,
     chunking_normativo,
@@ -93,6 +94,44 @@ class TestChunking(unittest.TestCase):
         self.assertTrue(all(isinstance(c, ChunkDoc) for c in chunks))
         self.assertTrue(all(c.breadcrumb is not None for c in chunks))
         self.assertTrue(all(c.ordem >= 1 for c in chunks))
+
+    def test_extrair_texto_pdf_com_pymupdf(self):
+        pdf_path = os.path.join(CAMINHO_MOCKS, "base1_nr17_ergonomia.pdf")
+        if not os.path.exists(pdf_path):
+            self.skipTest(f"Mock PDF não encontrado em {pdf_path}")
+
+        mock_page1 = MagicMock()
+        mock_page1.get_text.return_value = "Página 1 do documento mockado"
+        mock_page2 = MagicMock()
+        mock_page2.get_text.return_value = "Página 2 do documento mockado"
+
+        mock_doc = MagicMock()
+        mock_doc.__enter__.return_value = [mock_page1, mock_page2]
+        mock_doc.__exit__.return_value = False
+
+        mock_pymupdf = MagicMock()
+        mock_pymupdf.open.return_value = mock_doc
+
+        with patch("sinergia.rag.chunking.pymupdf", mock_pymupdf):
+            paginas = extrair_texto_pdf(pdf_path)
+
+        mock_pymupdf.open.assert_called_once_with(pdf_path)
+        self.assertEqual(len(paginas), 2)
+        self.assertEqual(paginas[0], (1, "Página 1 do documento mockado"))
+        self.assertEqual(paginas[1], (2, "Página 2 do documento mockado"))
+
+    def test_extrair_texto_pdf_fallback_sem_pymupdf(self):
+        pdf_path = os.path.join(CAMINHO_MOCKS, "base1_nr17_ergonomia.pdf")
+        if not os.path.exists(pdf_path):
+            self.skipTest(f"Mock PDF não encontrado em {pdf_path}")
+
+        with patch("sinergia.rag.chunking.pymupdf", None):
+            paginas = extrair_texto_pdf(pdf_path)
+            self.assertGreaterEqual(len(paginas), 1)
+
+    def test_extrair_texto_pdf_arquivo_inexistente(self):
+        with self.assertRaises(FileNotFoundError):
+            extrair_texto_pdf("arquivo_que_nao_existe.pdf")
 
 
 if __name__ == "__main__":
