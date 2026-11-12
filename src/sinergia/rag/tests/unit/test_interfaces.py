@@ -47,6 +47,7 @@ class TestInterfacesRAG(unittest.TestCase):
             versao="2024.1",
             secao="Item 17.5.3",
             pagina=4,
+            breadcrumb="Normas Regulamentadoras > NR-17 Ergonomia > Item 17.5.3",
         )
         t1 = TrechoRecuperado(
             id_trecho=1,
@@ -76,6 +77,7 @@ class TestInterfacesRAG(unittest.TestCase):
 
         prompt_str = contexto.formatar_para_prompt()
         self.assertIn("NR-17 Ergonomia", prompt_str)
+        self.assertIn("- Trilha: Normas Regulamentadoras > NR-17 Ergonomia > Item 17.5.3", prompt_str)
         self.assertIn("2024.1", prompt_str)
         self.assertIn("Item 17.5.3", prompt_str)
         self.assertIn("Página: 4", prompt_str)
@@ -95,6 +97,7 @@ class TestInterfacesRAG(unittest.TestCase):
             titulo="PCMSO",
             fonte="Doc 1",
             versao="1.0",
+            extra={"hierarquia": ["H1", "H2"], "coordenadas": [{"pagina": 1, "x0": 10.0}]},
         )
         trecho = TrechoRecuperado(
             conteudo="Exames periódicos",
@@ -104,6 +107,7 @@ class TestInterfacesRAG(unittest.TestCase):
         data = contexto.model_dump()
         self.assertEqual(len(data["trechos"]), 1)
         self.assertEqual(data["trechos"][0]["metadados"]["titulo"], "PCMSO")
+        self.assertEqual(data["trechos"][0]["metadados"]["extra"]["hierarquia"], ["H1", "H2"])
 
 
 if __name__ == "__main__":

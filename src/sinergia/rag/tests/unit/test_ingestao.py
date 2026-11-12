@@ -49,6 +49,8 @@ class TestIngestao(unittest.TestCase):
             self.assertTrue(any("UPDATE rag.documento" in s and "SET vigente = false" in s for s in calls_sql))
             # Verificar inserção do documento novo
             self.assertTrue(any("INSERT INTO rag.documento" in s for s in calls_sql))
+            # Verificar inserção dos trechos com metadados JSONB
+            self.assertTrue(any("INSERT INTO rag.trecho" in s and "metadados" in s for s in calls_sql))
             # Verificar commit da transação
             mock_conn.commit.assert_called_once()
 

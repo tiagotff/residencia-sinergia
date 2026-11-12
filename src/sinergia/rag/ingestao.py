@@ -1,6 +1,7 @@
 """CLI e pipeline de ingestão atômica e versionamento de documentos para o subsistema RAG."""
 
 import argparse
+import json
 import os
 import sys
 from typing import Any, Dict, List, Optional
@@ -90,8 +91,12 @@ def ingerir_documento(
         }
 
     # 2. Geração dos embeddings densos (768 dimensões)
-    textos = [c.conteudo for c in chunks]
-    embeddings = gerador.gerar_embeddings(textos)
+    # Contextualizar com o breadcrumb para máxima precisão semântica na recuperação
+    textos_embedding = [
+        f"[{c.breadcrumb}]\n{c.conteudo}" if c.breadcrumb else c.conteudo
+        for c in chunks
+    ]
+    embeddings = gerador.gerar_embeddings(textos_embedding)
 
     if dry_run:
         return {
@@ -135,14 +140,18 @@ def ingerir_documento(
             cur.execute(sql_insere_doc, (id_base, titulo, fonte, versao))
             id_documento = cur.fetchone()[0]
 
-            # 3.3 Inserção em lote (bulk insert) dos trechos e embeddings
+            # 3.3 Inserção em lote (bulk insert) dos trechos, embeddings e metadados JSONB
             sql_insere_trecho = """
-                INSERT INTO rag.trecho (id_documento, ordem, conteudo, embedding)
-                VALUES (%s, %s, %s, %s::vector);
+                INSERT INTO rag.trecho (id_documento, ordem, conteudo, embedding, metadados)
+                VALUES (%s, %s, %s, %s::vector, %s::jsonb);
             """
             for chunk, emb in zip(chunks, embeddings):
                 vetor_str = "[" + ",".join(str(x) for x in emb) + "]"
-                cur.execute(sql_insere_trecho, (id_documento, chunk.ordem, chunk.conteudo, vetor_str))
+                meta_json = json.dumps(chunk.metadados, ensure_ascii=False)
+                cur.execute(
+                    sql_insere_trecho,
+                    (id_documento, chunk.ordem, chunk.conteudo, vetor_str, meta_json),
+                )
 
         conn.commit()
 

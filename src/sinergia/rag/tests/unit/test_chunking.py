@@ -52,7 +52,9 @@ class TestChunking(unittest.TestCase):
         primeiro = chunks[0]
         self.assertIn("POP-RH-042", primeiro.breadcrumb)
         self.assertIn("pág.", primeiro.breadcrumb)
-        self.assertIn("[POP-RH-042", primeiro.conteudo)
+        # O conteúdo agora é texto limpo (não injeta mais [breadcrumb] no início do conteúdo)
+        self.assertNotIn("[POP-RH-042", primeiro.conteudo)
+        self.assertIn("breadcrumb", primeiro.metadados)
 
         # Validar metadados dinâmicos
         self.assertIn("hierarquia", primeiro.metadados)

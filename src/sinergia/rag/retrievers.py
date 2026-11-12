@@ -159,7 +159,8 @@ class BuscadorHibrido:
                     query_densa = """
                         SELECT t.id_trecho, t.conteudo, t.ordem,
                                d.id_documento, d.titulo, d.fonte, d.versao, d.id_base, d.vigente,
-                               (1 - (t.embedding <=> %s::vector)) AS similaridade
+                               (1 - (t.embedding <=> %s::vector)) AS similaridade,
+                               t.metadados
                         FROM rag.trecho t
                         JOIN rag.documento d ON d.id_documento = t.id_documento
                         WHERE d.id_base = %s AND d.vigente = true
@@ -171,6 +172,7 @@ class BuscadorHibrido:
 
                     densos = []
                     for row in linhas_densas:
+                        meta_json = row[10] if len(row) > 10 and isinstance(row[10], dict) else {}
                         meta = MetadadosTrecho(
                             id_documento=row[3],
                             titulo=row[4],
@@ -179,6 +181,10 @@ class BuscadorHibrido:
                             id_base=row[7],
                             ordem=row[2],
                             vigente=row[8],
+                            breadcrumb=meta_json.get("breadcrumb"),
+                            secao=meta_json.get("secoes_map", {}).get("h1") or meta_json.get("hierarquia", [None])[-1] if meta_json.get("hierarquia") else None,
+                            pagina=meta_json.get("page_start"),
+                            extra=meta_json,
                         )
                         score_sim = float(row[9]) if len(row) > 9 and row[9] is not None else 0.0
                         densos.append(
@@ -194,7 +200,8 @@ class BuscadorHibrido:
                     query_lexica = """
                         SELECT t.id_trecho, t.conteudo, t.ordem,
                                d.id_documento, d.titulo, d.fonte, d.versao, d.id_base, d.vigente,
-                               ts_rank(to_tsvector('portuguese', t.conteudo), plainto_tsquery('portuguese', %s)) AS rank_lex
+                               ts_rank(to_tsvector('portuguese', t.conteudo), plainto_tsquery('portuguese', %s)) AS rank_lex,
+                               t.metadados
                         FROM rag.trecho t
                         JOIN rag.documento d ON d.id_documento = t.id_documento
                         WHERE d.id_base = %s AND d.vigente = true
@@ -211,6 +218,7 @@ class BuscadorHibrido:
 
                     lexicos = []
                     for row in linhas_lexicas:
+                        meta_json = row[10] if len(row) > 10 and isinstance(row[10], dict) else {}
                         meta = MetadadosTrecho(
                             id_documento=row[3],
                             titulo=row[4],
@@ -219,6 +227,10 @@ class BuscadorHibrido:
                             id_base=row[7],
                             ordem=row[2],
                             vigente=row[8],
+                            breadcrumb=meta_json.get("breadcrumb"),
+                            secao=meta_json.get("secoes_map", {}).get("h1") or meta_json.get("hierarquia", [None])[-1] if meta_json.get("hierarquia") else None,
+                            pagina=meta_json.get("page_start"),
+                            extra=meta_json,
                         )
                         rank_lex = float(row[9]) if len(row) > 9 and row[9] is not None else 0.0
                         lexicos.append(

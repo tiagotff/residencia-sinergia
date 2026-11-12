@@ -134,12 +134,12 @@ def chunking_estrutural(
                     "page_end": page_end,
                     "token_count": token_count,
                     "types": types_list,
+                    "breadcrumb": breadcrumb,
                 }
 
-                conteudo_com_breadcrumb = f"[{breadcrumb}]\n{texto_chunk}"
                 chunks.append(
                     ChunkDoc(
-                        conteudo=conteudo_com_breadcrumb,
+                        conteudo=texto_chunk,
                         secao=secao,
                         pagina=page_start,
                         breadcrumb=breadcrumb,
@@ -203,12 +203,12 @@ def chunking_estrutural(
             "page_end": pagina,
             "token_count": None,
             "types": ["text"],
+            "breadcrumb": breadcrumb,
         }
 
-        conteudo_com_breadcrumb = f"[{breadcrumb}]\n{bloco}"
         chunks.append(
             ChunkDoc(
-                conteudo=conteudo_com_breadcrumb,
+                conteudo=bloco,
                 secao=secao_atual,
                 pagina=pagina,
                 breadcrumb=breadcrumb,

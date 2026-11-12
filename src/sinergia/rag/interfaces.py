@@ -1,6 +1,6 @@
 """Contratos e modelos fortemente tipados em Pydantic para o subsistema RAG."""
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -20,6 +20,10 @@ class MetadadosTrecho(BaseModel):
         description="Trilha de navegação hierárquica (ex: Documento > Capítulo > Artigo)",
     )
     vigente: bool = Field(default=True, description="Indicador de vigência ativa do documento")
+    extra: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Metadados adicionais flexíveis persistidos em JSONB (hierarquia, bboxes, coordenadas, etc.)",
+    )
 
 
 class TrechoRecuperado(BaseModel):
@@ -49,18 +53,19 @@ class ContextoRAG(BaseModel):
         blocos = []
         for i, trecho in enumerate(self.trechos, start=1):
             meta = trecho.metadados
+            linhas_meta = [f"--- [FONTE {i}]: {meta.titulo} (Versão: {meta.versao}) ---"]
+            if meta.breadcrumb:
+                linhas_meta.append(f"- Trilha: {meta.breadcrumb}")
             secao_str = meta.secao if meta.secao else "Não informada"
+            linhas_meta.append(f"- Seção/Artigo: {secao_str}")
             pagina_str = f"Página: {meta.pagina}" if meta.pagina is not None else "Página: N/A"
-            bloco = (
-                f"--- [FONTE {i}]: {meta.titulo} (Versão: {meta.versao}) ---\n"
-                f"- Seção/Artigo: {secao_str}\n"
-                f"- {pagina_str}\n"
-                f"- Fonte: {meta.fonte}\n"
-                f"- Score de Similaridade: {trecho.score:.4f}\n"
-                f"Conteúdo:\n"
-                f"{trecho.conteudo.strip()}"
-            )
-            blocos.append(bloco)
+            linhas_meta.append(f"- {pagina_str}")
+            linhas_meta.append(f"- Fonte: {meta.fonte}")
+            linhas_meta.append(f"- Score de Similaridade: {trecho.score:.4f}")
+            linhas_meta.append("Conteúdo:")
+            linhas_meta.append(trecho.conteudo.strip())
+
+            blocos.append("\n".join(linhas_meta))
 
         return "\n\n".join(blocos)
 
