@@ -20,6 +20,10 @@ class MetadadosTrecho(BaseModel):
         description="Trilha de navegação hierárquica (ex: Documento > Capítulo > Artigo)",
     )
     vigente: bool = Field(default=True, description="Indicador de vigência ativa do documento")
+    # TODO: Analisar quais outros campos estruturados são importantes como metadados de primeira classe:
+    # Ex: tipo_norma (Portaria, CLT, NR), orgao_emissor, data_publicacao, vigencia_inicio, vigencia_fim.
+    # FIXME: Reduzir redundância do campo 'extra' JSONB - evitar armazenar dados repetidos
+    # como 'secoes_map' vs 'hierarquia' e bboxes duplicadas.
     extra: Dict[str, Any] = Field(
         default_factory=dict,
         description="Metadados adicionais flexíveis persistidos em JSONB (hierarquia, bboxes, coordenadas, etc.)",

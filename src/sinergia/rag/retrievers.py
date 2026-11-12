@@ -18,6 +18,13 @@ def calcular_rrf(
 
     Fórmula: RRF_Score(d) = sum(1 / (k + rank_i(d)))
     """
+    # TODO: Analisar se essa está sendo a forma mais eficaz de similaridade e combinação:
+    # 1. Avaliar se RRF puro (k=60) supera ou deve ser complementado por Relative Score Fusion (RSF / min-max normalization)
+    #    ou Weighted Hybrid Search (ex: alpha * dense_score + (1-alpha) * lexical_score).
+    # 2. Avaliar se o valor padrão de k=60 é ideal para conjuntos pequenos de candidatos (top 10),
+    #    onde valores menores de k (ex: k=20 ou k=30) ou pesos diferenciados podem priorizar melhor a semântica.
+    # 3. Considerar inclusão de Re-ranking cross-encoder (ex: bge-reranker ou flashrank) pós-recuperação inicial
+    #    para validar se a eficácia e precisão do Top-K aumentam significativamente.
     scores: Dict[Any, float] = {}
     trechos_map: Dict[Any, TrechoRecuperado] = {}
 
@@ -156,6 +163,10 @@ class BuscadorHibrido:
                     vetor_str = "[" + ",".join(str(x) for x in vetor_query) + "]"
 
                     # 1. Busca densa pgvector com score de similaridade de cosseno
+                    # TODO: Analisar eficácia da métrica de similaridade:
+                    # - Atualmente usa distância de cosseno (<=>). Avaliar se Inner Product (<#>) com vetores normalizados
+                    #   traz maior performance/eficácia de indexação (HNSW/IVFFlat).
+                    # - Analisar o corte (threshold) mínimo de similaridade para descartar ruídos irrelevantes.
                     query_densa = """
                         SELECT t.id_trecho, t.conteudo, t.ordem,
                                d.id_documento, d.titulo, d.fonte, d.versao, d.id_base, d.vigente,
@@ -197,6 +208,10 @@ class BuscadorHibrido:
                         )
 
                     # 2. Busca léxica tsvector
+                    # TODO: Analisar eficácia do ranqueamento léxico:
+                    # - Avaliar se ts_rank com dicionário 'portuguese' cobre sinônimos jurídicos/técnicos
+                    #   ou se deve ser combinado com BM25 (ex: extensão pg_search/paradedb ou biblioteca bm25s).
+                    # - Avaliar se o fallback ILIKE adiciona falsos positivos nos resultados léxicos.
                     query_lexica = """
                         SELECT t.id_trecho, t.conteudo, t.ordem,
                                d.id_documento, d.titulo, d.fonte, d.versao, d.id_base, d.vigente,

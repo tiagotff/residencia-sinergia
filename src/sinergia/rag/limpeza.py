@@ -21,6 +21,13 @@ PADRAO_HIFEN_QUEBRA = re.compile(
 # Padrão para caracteres de controle indesejados (form feed, null bytes, backspaces)
 PADRAO_CONTROLE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
+# TODO: Adicionar regex/regras para limpar metadados de cabeçalho ministerial e carimbos no início do PDF.
+# Exemplo problemático vindo do banco/embedding:
+# "# **NORMA REGULAMENTADORA N. 17 - ERGONOMIA**_Ministério do Trabalho e Emprego_Secretaria de Inspeção do Trabalho - Departamento de Segurança e Saúde no Trabalho"
+# FIXME: Criar função especializada (ex: `limpar_cabecalho_ministerial_pdf` ou `limpar_inicio_documento`)
+# para remover ou separar linhas repetitivas institucionais (Ministério do Trabalho, Secretarias, Departamentos)
+# antes de gerar o embedding e salvar o conteúdo puro do chunk.
+
 
 def remover_cabecalhos_rodapes(texto: str) -> str:
     """Estágio 1: Remove marcações de paginação, rodapés e cabeçalhos repetitivos."""
@@ -81,9 +88,10 @@ def sanitizar_texto(texto: str) -> str:
     if not texto:
         return ""
 
+    # TODO: Integrar estágio de limpeza de cabeçalho inicial de órgãos/ministérios aqui.
+    # Ex: t0 = limpar_inicio_documento(texto)
     t1 = remover_cabecalhos_rodapes(texto)
     t2 = deshifenizar(t1)
     t3 = normalizar_espacos_e_controles(t2)
     t4 = preservar_marcadores_juridicos(t3)
     return t4.strip()
-

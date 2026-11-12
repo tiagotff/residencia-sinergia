@@ -80,6 +80,12 @@ def chunking_estrutural(
                 if not texto_chunk:
                     continue
 
+                # TODO: Implementar limpeza e sanitização do início do PDF no texto extraído.
+                # FIXME: Na primeira página ou início do documento, o texto costuma conter cabeçalhos governamentais
+                # grudados como: "# **NORMA REGULAMENTADORA N. 17 - ERGONOMIA**_Ministério do Trabalho e Emprego_Secretaria de Inspeção do Trabalho..."
+                # Esse ruído polui tanto o banco de dados quanto o vetor de embedding.
+                # Necessário sanitizar 'texto_chunk' (ou passar por função de limpeza de capa/cabeçalho) antes de persistir.
+
                 meta = getattr(chunk_nativo, "metadata", None)
                 section_path: List[str] = []
                 bboxes_brutas = []
@@ -125,6 +131,12 @@ def chunking_estrutural(
                 # Mapeamento dinâmico de níveis hierárquicos h1, h2, ..., hn
                 secoes_map = {f"h{i+1}": s.strip() for i, s in enumerate(section_path)}
 
+                # TODO: Analisar quais outros campos são importantes como metadados e remover redundância dos mesmos.
+                # FIXME: Otimização de metadados:
+                # - Redundância observada: 'hierarquia' e 'secoes_map' contêm basicamente as mesmas informações;
+                #   'breadcrumb' já concatena 'section_path' e página; 'bboxes' e 'coordenadas' duplicam geometria.
+                # - Campos a adicionar/manter: 'tipo_documento', 'secao_normalizada', 'artigo', 'paragrafo', 'anexo'.
+                # - Eliminar campos repetidos que incham o payload do JSONB e poluem consultas.
                 metadados_dinamicos = {
                     "hierarquia": [s.strip() for s in section_path],
                     "secoes_map": secoes_map,

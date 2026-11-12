@@ -92,6 +92,10 @@ def ingerir_documento(
 
     # 2. Geração dos embeddings densos (768 dimensões)
     # Contextualizar com o breadcrumb para máxima precisão semântica na recuperação
+    # TODO: Analisar impacto do breadcrumb no embedding vs poluição semântica.
+    # FIXME: Se o início do PDF tiver texto ministerial grudado ("# **NORMA REGULAMENTADORA N. 17..._Ministério..."),
+    # ele acaba entrando no embedding aqui e distorcendo a similaridade vetorial.
+    # Certificar-se de sanitizar os textos antes de enviar para o gerador de embeddings.
     textos_embedding = [
         f"[{c.breadcrumb}]\n{c.conteudo}" if c.breadcrumb else c.conteudo
         for c in chunks
@@ -147,6 +151,8 @@ def ingerir_documento(
             """
             for chunk, emb in zip(chunks, embeddings):
                 vetor_str = "[" + ",".join(str(x) for x in emb) + "]"
+                # TODO: Analisar campos redundantes em chunk.metadados antes de serializar em JSONB.
+                # FIXME: Remover duplicações entre 'metadados' e as colunas já existentes na tabela ou breadcrumbs.
                 meta_json = json.dumps(chunk.metadados, ensure_ascii=False)
                 cur.execute(
                     sql_insere_trecho,
