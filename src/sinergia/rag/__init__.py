@@ -9,8 +9,6 @@ from sinergia.rag.chunking import (
     ChunkDoc,
     chunking_documento_pdf,
     chunking_estrutural,
-    chunking_normativo,
-    extrair_texto_pdf,
 )
 from sinergia.rag.embeddings import (
     GeradorEmbeddings,
@@ -62,8 +60,6 @@ __all__ = [
     "sanitizar_texto",
     # Chunking
     "ChunkDoc",
-    "extrair_texto_pdf",
-    "chunking_normativo",
     "chunking_estrutural",
     "chunking_documento_pdf",
     # Recuperação

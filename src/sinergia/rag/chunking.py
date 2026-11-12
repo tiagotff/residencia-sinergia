@@ -1,9 +1,8 @@
-"""Módulo de chunking híbrido (normativo e estrutural) com injeção de metadados e breadcrumbs."""
+"""Módulo de chunking estrutural com PyMuPDF, hierarquia H1-H2-H3...Hn, coordenadas e breadcrumbs."""
 
 import os
 import re
-import zlib
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 
 from sinergia.rag.limpeza import sanitizar_texto
@@ -15,149 +14,146 @@ except ImportError:
 
 
 class ChunkDoc(BaseModel):
-    """Representação de um chunk de texto particionado com metadados estruturais."""
+    """Representação de um chunk de texto particionado com metadados estruturais flexíveis."""
 
-    conteudo: str = Field(..., description="Conteúdo textual do chunk incluindo breadcrumb injetado")
-    secao: Optional[str] = Field(default=None, description="Seção, Artigo ou Item normativo")
+    conteudo: str = Field(
+        ..., description="Conteúdo textual do chunk incluindo breadcrumb injetado"
+    )
+    secao: Optional[str] = Field(
+        default=None, description="Seção mais específica ou nível hierárquico ativo"
+    )
     pagina: int = Field(default=1, description="Número da página de origem")
     ordem: int = Field(default=1, description="Ordem sequencial do chunk no documento")
     breadcrumb: Optional[str] = Field(
         default=None, description="Trilha hierárquica completa do trecho"
     )
-
-
-def extrair_texto_pdf(caminho_pdf: str) -> List[Tuple[int, str]]:
-    """Extrai texto e número de página de um arquivo PDF via PyMuPDF ou fallback nativo."""
-    if not os.path.exists(caminho_pdf):
-        raise FileNotFoundError(f"Arquivo PDF não encontrado: {caminho_pdf}")
-
-    if pymupdf is not None:
-        with pymupdf.open(caminho_pdf) as doc:
-            paginas = []
-            for i, pagina in enumerate(doc, start=1):
-                texto = pagina.get_text()
-                paginas.append((i, texto))
-            return paginas
-
-    # Fallback nativo: descompressão de streams PDF via zlib
-    with open(caminho_pdf, "rb") as f:
-        conteudo = f.read()
-
-    paginas = []
-    pos = 0
-    page_num = 1
-    while True:
-        s_idx = conteudo.find(b"stream\n", pos)
-        if s_idx == -1:
-            s_idx = conteudo.find(b"stream\r\n", pos)
-            if s_idx == -1:
-                break
-            offset = len(b"stream\r\n")
-        else:
-            offset = len(b"stream\n")
-
-        e_idx = conteudo.find(b"endstream", s_idx)
-        if e_idx == -1:
-            break
-
-        dados_comprimidos = conteudo[s_idx + offset : e_idx].rstrip(b"\r\n")
-        try:
-            dados_decomp = zlib.decompress(dados_comprimidos)
-            # Extrair sequências de texto em Tj ou TJ
-            padrao_texto = re.findall(rb"\((.*?)\)", dados_decomp)
-            partes = [p.decode("latin1", errors="ignore") for p in padrao_texto if len(p) > 0]
-            texto_extraido = " ".join(partes)
-            if len(texto_extraido.strip()) > 20:
-                paginas.append((page_num, texto_extraido))
-                page_num += 1
-        except Exception:
-            pass
-
-        pos = e_idx + len(b"endstream")
-
-    if not paginas:
-        # Se nenhum stream válido for encontrado, retornar ao menos uma página vazia
-        paginas.append((1, ""))
-
-    return paginas
-
-
-def chunking_normativo(
-    texto: str,
-    titulo_documento: str,
-    pagina: int = 1,
-) -> List[ChunkDoc]:
-    """Particiona textos normativos preservando artigos/itens e suas exceções/parágrafos."""
-    texto_limpo = sanitizar_texto(texto)
-    if not texto_limpo:
-        return []
-
-    # Regex para capturar divisões normativas: Artigos, Itens, Capítulos
-    padrao_divisor = re.compile(
-        r"(?=(?:\n|^)(?:Art\.\s*\d+[ºo°]?|Artigo\s*\d+[ºo°]?|Item\s*\d+(?:\.\d+)*|CAPÍTULO\s+[IVXLCDM\d]+[^\n]*))",
-        re.IGNORECASE,
+    metadados: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Metadados dinâmicos adicionais (hierarquia H1..Hn, coordenadas/bboxes, token_count, etc.)",
     )
-
-    segmentos = [s.strip() for s in padrao_divisor.split(texto_limpo) if s.strip()]
-    if not segmentos:
-        segmentos = [texto_limpo]
-
-    chunks = []
-    capitulo_atual = ""
-
-    for seg in segmentos:
-        # Verificar se é cabeçalho de capítulo
-        match_cap = re.match(r"^(CAPÍTULO\s+[IVXLCDM\d]+[^\n]*)", seg, re.IGNORECASE)
-        if match_cap:
-            capitulo_atual = match_cap.group(1).strip()
-            # Se o segmento contém mais texto após o capítulo, continuará a processar
-            linhas = seg.split("\n", 1)
-            if len(linhas) > 1 and len(linhas[1].strip()) > 0:
-                seg = linhas[1].strip()
-            else:
-                continue
-
-        # Identificar seção (Artigo ou Item)
-        match_art = re.search(r"\b(Art\.\s*\d+[ºo°]?|Artigo\s*\d+[ºo°]?)", seg, re.IGNORECASE)
-        match_item = re.search(r"\b(Item\s*\d+(?:\.\d+)*)", seg, re.IGNORECASE)
-
-        if match_art:
-            secao = match_art.group(1).strip()
-        elif match_item:
-            secao = match_item.group(1).strip()
-        elif capitulo_atual:
-            secao = capitulo_atual
-        else:
-            secao = "Disposições Gerais"
-
-        partes_breadcrumb = [titulo_documento]
-        if capitulo_atual and capitulo_atual != secao:
-            partes_breadcrumb.append(capitulo_atual)
-        partes_breadcrumb.append(secao)
-        partes_breadcrumb.append(f"pág. {pagina}")
-        breadcrumb = " > ".join(partes_breadcrumb)
-
-        conteudo_com_breadcrumb = f"[{breadcrumb}]\n{seg}"
-        chunks.append(
-            ChunkDoc(
-                conteudo=conteudo_com_breadcrumb,
-                secao=secao,
-                pagina=pagina,
-                breadcrumb=breadcrumb,
-            )
-        )
-
-    return chunks
 
 
 def chunking_estrutural(
-    texto: str,
-    titulo_documento: str,
+    documento: Optional[Union[str, Any]] = None,
+    titulo_documento: str = "",
     pagina: int = 1,
     max_chars: int = 800,
+    texto: Optional[str] = None,
 ) -> List[ChunkDoc]:
-    """Particiona manuais, POPs e procedimentos por seções e blocos lógicos."""
-    texto_limpo = sanitizar_texto(texto)
+    """Particiona documentos PDF ou blocos de texto por seções e hierarquia H1-H2-H3...Hn.
+
+    Quando `documento` (ou `texto`) é um caminho de arquivo PDF existente ou objeto
+    PyMuPDF Document, utiliza nativamente `doc.to_chunks()` para segmentação
+    estrutural da indústria, preservando tabelas em Markdown, coordenadas espaciais
+    de cada sentença (bboxes) e construindo metadados de breadcrumb hierárquico dinâmico.
+
+    Caso receba texto puro (`str`), opera em modo de compatibilidade dividindo
+    em blocos estruturais/markdown e gerando a trilha de breadcrumbs.
+    """
+    alvo = documento if documento is not None else texto
+    if alvo is None:
+        return []
+
+    # 1. Modo nativo PyMuPDF se for um caminho de arquivo PDF existente ou objeto Document
+    is_pdf_path = isinstance(alvo, str) and (
+        alvo.lower().endswith(".pdf") or os.path.exists(alvo)
+    )
+    is_pdf_doc = pymupdf is not None and hasattr(alvo, "to_chunks")
+
+    if pymupdf is not None and (is_pdf_path or is_pdf_doc):
+        chunks: List[ChunkDoc] = []
+        doc = None
+        should_close = False
+        try:
+            if is_pdf_doc:
+                doc = alvo
+            else:
+                doc = pymupdf.open(alvo)
+                should_close = True
+
+            # Invocação do chunking nativo do PyMuPDF
+            chunks_nativos = doc.to_chunks()
+
+            for chunk_nativo in chunks_nativos:
+                texto_chunk = getattr(chunk_nativo, "text", "") or ""
+                texto_chunk = texto_chunk.strip()
+                if not texto_chunk:
+                    continue
+
+                meta = getattr(chunk_nativo, "metadata", None)
+                section_path: List[str] = []
+                bboxes_brutas = []
+                page_start = pagina
+                page_end = pagina
+                token_count = None
+                types_list = []
+
+                if meta is not None:
+                    section_path = getattr(meta, "section_path", []) or []
+                    bboxes_brutas = getattr(meta, "bboxes", []) or []
+                    page_start = getattr(meta, "page_start", pagina)
+                    page_end = getattr(meta, "page_end", page_start)
+                    token_count = getattr(meta, "token_count", None)
+                    types_list = getattr(meta, "types", []) or []
+
+                # Identificar seção mais específica
+                secao = section_path[-1].strip() if section_path else "Geral"
+
+                # Montar breadcrumb dinâmico: TituloDocumento > H1 > H2 > ... > Hn > pág. X
+                partes_breadcrumb = [titulo_documento] if titulo_documento else []
+                for s in section_path:
+                    s_limpo = s.strip()
+                    if s_limpo and s_limpo != titulo_documento and s_limpo not in partes_breadcrumb:
+                        partes_breadcrumb.append(s_limpo)
+                partes_breadcrumb.append(f"pág. {page_start}")
+                breadcrumb = " > ".join(partes_breadcrumb)
+
+                # Formatar coordenadas estruturadas amigáveis a partir dos bboxes
+                coordenadas = []
+                for b in bboxes_brutas:
+                    if isinstance(b, (list, tuple)) and len(b) >= 5:
+                        coordenadas.append(
+                            {
+                                "pagina": int(b[0]),
+                                "x0": round(float(b[1]), 2),
+                                "y0": round(float(b[2]), 2),
+                                "x1": round(float(b[3]), 2),
+                                "y1": round(float(b[4]), 2),
+                            }
+                        )
+
+                # Mapeamento dinâmico de níveis hierárquicos h1, h2, ..., hn
+                secoes_map = {f"h{i+1}": s.strip() for i, s in enumerate(section_path)}
+
+                metadados_dinamicos = {
+                    "hierarquia": [s.strip() for s in section_path],
+                    "secoes_map": secoes_map,
+                    "bboxes": bboxes_brutas,
+                    "coordenadas": coordenadas,
+                    "page_start": page_start,
+                    "page_end": page_end,
+                    "token_count": token_count,
+                    "types": types_list,
+                }
+
+                conteudo_com_breadcrumb = f"[{breadcrumb}]\n{texto_chunk}"
+                chunks.append(
+                    ChunkDoc(
+                        conteudo=conteudo_com_breadcrumb,
+                        secao=secao,
+                        pagina=page_start,
+                        breadcrumb=breadcrumb,
+                        metadados=metadados_dinamicos,
+                    )
+                )
+
+            return chunks
+        finally:
+            if should_close and doc is not None:
+                doc.close()
+
+    # 2. Modo compatibilidade para texto puro
+    texto_limpo = sanitizar_texto(str(alvo))
     if not texto_limpo:
         return []
 
@@ -168,22 +164,55 @@ def chunking_estrutural(
 
     chunks = []
     secao_atual = "Geral"
+    hierarquia_atual: List[str] = []
 
     for bloco in blocos:
-        # Detectar possível cabeçalho de seção (ex: "1. OBJETIVO", "2. PROCEDIMENTOS")
-        match_titulo = re.match(r"^(\d+\.\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ\s]{3,40})", bloco)
-        if match_titulo:
-            secao_atual = match_titulo.group(1).strip()
+        # Detectar cabeçalho markdown (# H1, ## H2, etc.) ou cabeçalho numerado
+        match_md = re.match(r"^(#{1,6})\s+(.+)$", bloco, re.MULTILINE)
+        match_titulo = re.match(
+            r"^(\d+(?:\.\d+)*\.?\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ\s]{3,60})", bloco
+        )
 
-        breadcrumb = f"{titulo_documento} > {secao_atual} > pág. {pagina}"
+        if match_md:
+            nivel = len(match_md.group(1))
+            titulo_h = match_md.group(2).strip()
+            # Ajustar hierarquia dinâmica
+            hierarquia_atual = hierarquia_atual[: nivel - 1] + [titulo_h]
+            secao_atual = titulo_h
+        elif match_titulo:
+            titulo_num = match_titulo.group(1).strip()
+            hierarquia_atual = [titulo_num]
+            secao_atual = titulo_num
+
+        partes_breadcrumb = [titulo_documento] if titulo_documento else []
+        for h in hierarquia_atual:
+            if h not in partes_breadcrumb:
+                partes_breadcrumb.append(h)
+        if not hierarquia_atual and secao_atual != "Geral":
+            partes_breadcrumb.append(secao_atual)
+        partes_breadcrumb.append(f"pág. {pagina}")
+        breadcrumb = " > ".join(partes_breadcrumb)
+
+        secoes_map = {f"h{i+1}": h for i, h in enumerate(hierarquia_atual)}
+        metadados_dinamicos = {
+            "hierarquia": list(hierarquia_atual),
+            "secoes_map": secoes_map,
+            "bboxes": [],
+            "coordenadas": [],
+            "page_start": pagina,
+            "page_end": pagina,
+            "token_count": None,
+            "types": ["text"],
+        }
+
         conteudo_com_breadcrumb = f"[{breadcrumb}]\n{bloco}"
-
         chunks.append(
             ChunkDoc(
                 conteudo=conteudo_com_breadcrumb,
                 secao=secao_atual,
                 pagina=pagina,
                 breadcrumb=breadcrumb,
+                metadados=metadados_dinamicos,
             )
         )
 
@@ -194,36 +223,25 @@ def chunking_documento_pdf(
     caminho_pdf: str,
     titulo_documento: str,
 ) -> List[ChunkDoc]:
-    """Carrega o PDF, extrai as páginas e executa chunking híbrido com injeção de metadados."""
-    paginas = extrair_texto_pdf(caminho_pdf)
-    todos_chunks: List[ChunkDoc] = []
+    """Carrega o PDF e executa o particionamento estrutural unificado via PyMuPDF.
 
-    for num_pagina, texto_pagina in paginas:
-        if not texto_pagina or not texto_pagina.strip():
-            continue
+    Utiliza nativamente o analisador estrutural do PyMuPDF (`doc.to_chunks()`),
+    gerando chunks no padrão de mercado com:
+    - Hierarquia dinâmica H1-H2-H3...Hn (secoes_map e hierarquia)
+    - Breadcrumbs padronizados injetados no conteúdo e nos metadados
+    - Coordenadas espaciais de sentenças/blocos (bboxes e coordenadas normalizadas)
+    - Ordem sequencial contínua para o documento completo
+    """
+    if not os.path.exists(caminho_pdf):
+        raise FileNotFoundError(f"Arquivo PDF não encontrado: {caminho_pdf}")
 
-        # Identificar se o texto possui marcadores normativos
-        tem_artigo = bool(re.search(r"\b(?:Art\.|Artigo)\s*\d+", texto_pagina, re.IGNORECASE))
-        tem_item = bool(re.search(r"\bItem\s*\d+", texto_pagina, re.IGNORECASE))
-
-        if tem_artigo or tem_item:
-            chunks_pagina = chunking_normativo(
-                texto=texto_pagina,
-                titulo_documento=titulo_documento,
-                pagina=num_pagina,
-            )
-        else:
-            chunks_pagina = chunking_estrutural(
-                texto=texto_pagina,
-                titulo_documento=titulo_documento,
-                pagina=num_pagina,
-            )
-
-        todos_chunks.extend(chunks_pagina)
+    todos_chunks = chunking_estrutural(
+        documento=caminho_pdf,
+        titulo_documento=titulo_documento,
+    )
 
     # Atribuir ordem sequencial única aos chunks do documento
     for idx, chunk in enumerate(todos_chunks, start=1):
         chunk.ordem = idx
 
     return todos_chunks
-
