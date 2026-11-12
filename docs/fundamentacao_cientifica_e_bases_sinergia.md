@@ -251,3 +251,4 @@ flowchart LR
 > **Por que essas 10 features são ideais para o grupo?**
 > 1. **Zero quebra de contrato ou banco:** Todas as 10 ideias utilizam exatamente as tabelas e colunas que **já existem** em [`001_schema_inicial.sql`](../db/schema/001_schema_inicial.sql) (como `treinamento.id_epi`, `lembrete.status = 'REAGENDADO'`, `cargo.cbo`, `evento.tipo` e `vw_features_beneficio`).
 > 2. **Rastreabilidade científica 1:1 para a banca:** Cada feature responde diretamente à pergunta *"De onde veio essa funcionalidade?"* com um artigo de 2024–2026 do NotebookLM e com os dados da pesquisa primária do grupo ($N = 42$).
+
