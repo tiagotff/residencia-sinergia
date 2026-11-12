@@ -110,7 +110,15 @@ class BuscadorHibrido:
             (t, _similaridade_cosseno(vetor_query, v)) for t, v in candidatos
         ]
         scores_densos.sort(key=lambda x: x[1], reverse=True)
-        densos = [item[0] for item in scores_densos]
+        densos = [
+            TrechoRecuperado(
+                id_trecho=item[0].id_trecho,
+                conteudo=item[0].conteudo,
+                score=float(item[1]),
+                metadados=item[0].metadados,
+            )
+            for item in scores_densos
+        ]
 
         # 2. Busca Léxica (overlap de termos)
         termos_query = set(query.lower().split())
@@ -124,7 +132,15 @@ class BuscadorHibrido:
 
         scores_lexicos = [(t, _score_lexico(t.conteudo)) for t, _ in candidatos]
         scores_lexicos.sort(key=lambda x: x[1], reverse=True)
-        lexicos = [item[0] for item in scores_lexicos]
+        lexicos = [
+            TrechoRecuperado(
+                id_trecho=item[0].id_trecho,
+                conteudo=item[0].conteudo,
+                score=float(item[1]),
+                metadados=item[0].metadados,
+            )
+            for item in scores_lexicos
+        ]
 
         return densos, lexicos
 
@@ -139,17 +155,18 @@ class BuscadorHibrido:
                     vetor_query = self.gerador_embeddings.gerar_embedding(query)
                     vetor_str = "[" + ",".join(str(x) for x in vetor_query) + "]"
 
-                    # 1. Busca densa pgvector
+                    # 1. Busca densa pgvector com score de similaridade de cosseno
                     query_densa = """
                         SELECT t.id_trecho, t.conteudo, t.ordem,
-                               d.id_documento, d.titulo, d.fonte, d.versao, d.id_base, d.vigente
+                               d.id_documento, d.titulo, d.fonte, d.versao, d.id_base, d.vigente,
+                               (1 - (t.embedding <=> %s::vector)) AS similaridade
                         FROM rag.trecho t
                         JOIN rag.documento d ON d.id_documento = t.id_documento
                         WHERE d.id_base = %s AND d.vigente = true
                         ORDER BY t.embedding <=> %s::vector
                         LIMIT 10;
                     """
-                    cur.execute(query_densa, (id_base, vetor_str))
+                    cur.execute(query_densa, (vetor_str, id_base, vetor_str))
                     linhas_densas = cur.fetchall()
 
                     densos = []
@@ -163,7 +180,15 @@ class BuscadorHibrido:
                             ordem=row[2],
                             vigente=row[8],
                         )
-                        densos.append(TrechoRecuperado(id_trecho=row[0], conteudo=row[1], metadados=meta))
+                        score_sim = float(row[9]) if len(row) > 9 and row[9] is not None else 0.0
+                        densos.append(
+                            TrechoRecuperado(
+                                id_trecho=row[0],
+                                conteudo=row[1],
+                                score=score_sim,
+                                metadados=meta,
+                            )
+                        )
 
                     # 2. Busca léxica tsvector
                     query_lexica = """
@@ -195,14 +220,24 @@ class BuscadorHibrido:
                             ordem=row[2],
                             vigente=row[8],
                         )
-                        lexicos.append(TrechoRecuperado(id_trecho=row[0], conteudo=row[1], metadados=meta))
+                        rank_lex = float(row[9]) if len(row) > 9 and row[9] is not None else 0.0
+                        lexicos.append(
+                            TrechoRecuperado(
+                                id_trecho=row[0],
+                                conteudo=row[1],
+                                score=rank_lex,
+                                metadados=meta,
+                            )
+                        )
 
                     return densos, lexicos
         except Exception:
             return None
 
-    def buscar(self, query: str, id_base: int) -> ContextoRAG:
-        """Executa busca híbrida combinada com RRF (k=60) e retorna o ContextoRAG com top-4 trechos."""
+    def buscar(self, query: str, id_base: int, limite: int = 4) -> ContextoRAG:
+        """Executa busca híbrida combinada com RRF (k=60) e retorna o ContextoRAG limitado a 4 trechos com score."""
+        limite_efetivo = limite if limite is not None else self.top_k
+
         # Se houver trechos em memória (modo mock/testes locais), prioriza a busca em memória
         if self._trechos_memoria:
             densos, lexicos = self._buscar_memoria(query, id_base)
@@ -213,7 +248,8 @@ class BuscadorHibrido:
             else:
                 densos, lexicos = self._buscar_memoria(query, id_base)
 
-        top_trechos = calcular_rrf(densos, lexicos, k=self.k_rrf, top_k=self.top_k)
+        top_trechos = calcular_rrf(densos, lexicos, k=self.k_rrf, top_k=limite_efetivo)
+        top_trechos = top_trechos[:limite_efetivo]
 
         return ContextoRAG(
             query=query,

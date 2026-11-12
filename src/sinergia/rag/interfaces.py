@@ -56,6 +56,7 @@ class ContextoRAG(BaseModel):
                 f"- Seção/Artigo: {secao_str}\n"
                 f"- {pagina_str}\n"
                 f"- Fonte: {meta.fonte}\n"
+                f"- Score de Similaridade: {trecho.score:.4f}\n"
                 f"Conteúdo:\n"
                 f"{trecho.conteudo.strip()}"
             )

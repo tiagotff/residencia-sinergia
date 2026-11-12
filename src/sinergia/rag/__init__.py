@@ -35,6 +35,7 @@ from sinergia.rag.retrievers import (
     BuscadorHibrido,
     calcular_rrf,
 )
+from sinergia.rag.cli import modo_interativo
 from sinergia.rag.tools import (
     consultar_base_conhecimento,
     ferramenta_busca_direitos,
@@ -69,12 +70,12 @@ __all__ = [
     "mapear_mock_para_metadados",
     "ingerir_documento",
     "ingerir_diretorio_mocks",
-    # Ferramentas CrewAI
+    # Ferramentas CrewAI e CLI
     "consultar_base_conhecimento",
     "ferramenta_busca_pausas",
     "ferramenta_busca_direitos",
     "ferramenta_busca_procedimentos",
     "ferramenta_busca_saude_ocupacional",
     "ferramenta_busca_epis",
+    "modo_interativo",
 ]
-

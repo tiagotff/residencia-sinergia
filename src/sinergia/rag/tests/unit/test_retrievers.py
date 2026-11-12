@@ -160,6 +160,35 @@ class TestRetrievers(unittest.TestCase):
         self.assertEqual(contexto.trechos[0].id_trecho, 10)
         self.assertEqual(contexto.trechos[0].metadados.id_base, 1)
         self.assertTrue(contexto.trechos[0].metadados.vigente)
+        self.assertGreater(contexto.trechos[0].score, 0.0)
+
+    @patch.object(BuscadorHibrido, "_buscar_banco", return_value=None)
+    def test_buscador_limite_4_registros_e_score(self, mock_buscar_banco):
+        mock_embedding = MagicMock()
+        mock_embedding.gerar_embedding.return_value = [0.1] * 768
+
+        buscador = BuscadorHibrido(gerador_embeddings=mock_embedding)
+        itens = [
+            TrechoRecuperado(
+                id_trecho=i,
+                conteudo=f"Conteudo de teste {i}",
+                metadados=MetadadosTrecho(
+                    titulo=f"Doc {i}",
+                    fonte="Fonte",
+                    versao="1.0",
+                    id_base=1,
+                    vigente=True,
+                ),
+            )
+            for i in range(1, 10)
+        ]
+        buscador.adicionar_trechos_memoria(itens)
+
+        contexto = buscador.buscar(query="teste", id_base=1, limite=4)
+        self.assertEqual(len(contexto.trechos), 4)
+        for t in contexto.trechos:
+            self.assertIsNotNone(t.score)
+            self.assertGreater(t.score, 0.0)
 
 
 if __name__ == "__main__":
