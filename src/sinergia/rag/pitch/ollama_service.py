@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -124,6 +125,7 @@ class RespostaGeradaOllama(BaseModel):
     """Resposta fundamentada gerada pela LLM local junto às métricas e prompt enviado."""
 
     resposta: str = Field(..., description="Texto final da resposta")
+    reasoning: str = Field(default="", description="Raciocínio emitido pelo modelo durante a geração")
     citacoes: list[str] = Field(default_factory=list, description="Pílulas de citação formatadas")
     metricas: MetricasOllama = Field(..., description="Métricas nativas do Ollama")
     llm_ms: float = Field(default=0.0, description="Latência total da etapa LLM em ms")
@@ -175,6 +177,94 @@ def _remover_bloco_think(texto: str) -> str:
     """Remove blocos <think>...</think> emitidos por modelos com raciocínio."""
     limpo = re.sub(r"<think>.*?</think>", "", texto, flags=re.DOTALL | re.IGNORECASE)
     return limpo.strip()
+
+
+class _ThinkStreamParser:
+    """Separa tokens de raciocínio (campo estruturado ou tags <think>) e resposta final em streaming."""
+
+    _OPEN_TAG = "<think>"
+    _CLOSE_TAG = "</think>"
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._in_think = False
+        self._reasoning_parts: list[str] = []
+        self._content_parts: list[str] = []
+
+    def feed_reasoning(self, text: str) -> bool:
+        """Adiciona trecho vindo de campo estruturado de reasoning. Retorna True se houve alteração."""
+        if not text:
+            return False
+        self._reasoning_parts.append(text)
+        return True
+
+    def feed_content(self, text: str) -> tuple[bool, bool]:
+        """Processa trecho de content, separando blocos <think>...</think>. Retorna (mudou_reasoning, mudou_content)."""
+        if not text:
+            return False, False
+
+        self._buffer += text
+        mudou_reasoning = False
+        mudou_content = False
+
+        while self._buffer:
+            lower_buf = self._buffer.lower()
+            if not self._in_think:
+                idx = lower_buf.find(self._OPEN_TAG)
+                if idx != -1:
+                    if idx > 0:
+                        self._content_parts.append(self._buffer[:idx])
+                        mudou_content = True
+                    self._buffer = self._buffer[idx + len(self._OPEN_TAG) :]
+                    self._in_think = True
+                    continue
+
+                keep = len(self._OPEN_TAG) - 1
+                if len(self._buffer) > keep:
+                    flush = self._buffer[:-keep]
+                    self._content_parts.append(flush)
+                    self._buffer = self._buffer[-keep:]
+                    mudou_content = True
+                break
+            else:
+                idx = lower_buf.find(self._CLOSE_TAG)
+                if idx != -1:
+                    if idx > 0:
+                        self._reasoning_parts.append(self._buffer[:idx])
+                        mudou_reasoning = True
+                    self._buffer = self._buffer[idx + len(self._CLOSE_TAG) :]
+                    self._in_think = False
+                    continue
+
+                keep = len(self._CLOSE_TAG) - 1
+                if len(self._buffer) > keep:
+                    flush = self._buffer[:-keep]
+                    self._reasoning_parts.append(flush)
+                    self._buffer = self._buffer[-keep:]
+                    mudou_reasoning = True
+                break
+
+        return mudou_reasoning, mudou_content
+
+    def flush(self) -> None:
+        """Descarrega o buffer restante ao final do stream."""
+        if not self._buffer:
+            return
+        if self._in_think:
+            self._reasoning_parts.append(self._buffer)
+        else:
+            self._content_parts.append(self._buffer)
+        self._buffer = ""
+
+    @property
+    def reasoning_text(self) -> str:
+        """Texto acumulado do raciocínio até o momento."""
+        return "".join(self._reasoning_parts).strip()
+
+    @property
+    def content_text(self) -> str:
+        """Texto acumulado da resposta final até o momento."""
+        return "".join(self._content_parts).strip()
 
 
 def _mesclar_sem_duplicatas(primarios: list[str], presets: list[str]) -> list[str]:
@@ -438,35 +528,62 @@ class OllamaPitchService(_BasePitchLLMService):
         pergunta: str,
         contexto: ContextoRAG,
         modelo: str | None = None,
+        ao_receber_reasoning: Callable[[str], None] | None = None,
+        ao_receber_conteudo: Callable[[str], None] | None = None,
     ) -> RespostaGeradaOllama:
-        """Gera resposta em português fundamentada nos trechos recuperados e coleta métricas Ollama."""
+        """Gera resposta em português fundamentada nos trechos recuperados com streaming e raciocínio."""
         modelo_ativo = self.selecionar_modelo_ativo(modelo)
         citacoes = extrair_citacoes_contexto(contexto)
         system_prompt, user_prompt, prompt_completo = self._montar_prompts_geracao(pergunta, contexto)
 
         inicio = time.perf_counter()
+        parser = _ThinkStreamParser()
+        dados_finais: dict[str, Any] = {}
         try:
             payload = {
                 "model": modelo_ativo,
-                "stream": False,
-                "think": False,
+                "stream": True,
                 "options": {"temperature": 0.1},
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
             }
-            resp = httpx.post(f"{self.base_url}/api/chat", json=payload, timeout=self.timeout_s)
-            resp.raise_for_status()
-            dados = resp.json()
+            with httpx.stream(
+                "POST",
+                f"{self.base_url}/api/chat",
+                json=payload,
+                timeout=self.timeout_s,
+            ) as resp:
+                resp.raise_for_status()
+                for linha in resp.iter_lines():
+                    if not linha:
+                        continue
+                    chunk = json.loads(linha)
+                    msg = chunk.get("message") or {}
+                    mudou_r = parser.feed_reasoning(msg.get("thinking") or "")
+                    mudou_r2, mudou_c = parser.feed_content(msg.get("content") or "")
+                    if (mudou_r or mudou_r2) and ao_receber_reasoning and parser.reasoning_text:
+                        ao_receber_reasoning(parser.reasoning_text)
+                    if mudou_c and ao_receber_conteudo and parser.content_text:
+                        ao_receber_conteudo(parser.content_text)
+                    if chunk.get("done"):
+                        dados_finais = chunk
+
+            parser.flush()
+            if ao_receber_reasoning and parser.reasoning_text:
+                ao_receber_reasoning(parser.reasoning_text)
+            if ao_receber_conteudo and parser.content_text:
+                ao_receber_conteudo(parser.content_text)
+
             llm_ms = (time.perf_counter() - inicio) * 1000.0
 
-            resposta_texto = _remover_bloco_think(dados.get("message", {}).get("content") or "")
-            prompt_tokens = int(dados.get("prompt_eval_count") or 0)
-            eval_tokens = int(dados.get("eval_count") or 0)
-            load_ms = float(dados.get("load_duration") or 0) / 1_000_000.0
-            eval_ms = float(dados.get("eval_duration") or 0) / 1_000_000.0
-            total_ms = float(dados.get("total_duration") or 0) / 1_000_000.0
+            resposta_texto = parser.content_text
+            prompt_tokens = int(dados_finais.get("prompt_eval_count") or 0)
+            eval_tokens = int(dados_finais.get("eval_count") or 0)
+            load_ms = float(dados_finais.get("load_duration") or 0) / 1_000_000.0
+            eval_ms = float(dados_finais.get("eval_duration") or 0) / 1_000_000.0
+            total_ms = float(dados_finais.get("total_duration") or 0) / 1_000_000.0
 
             tok_per_sec = (
                 (eval_tokens / (eval_ms / 1000.0))
@@ -485,6 +602,7 @@ class OllamaPitchService(_BasePitchLLMService):
             )
             return RespostaGeradaOllama(
                 resposta=resposta_texto or "Não foi possível gerar resposta com o modelo selecionado.",
+                reasoning=parser.reasoning_text,
                 citacoes=citacoes,
                 metricas=metricas,
                 llm_ms=round(llm_ms, 2),
@@ -625,8 +743,10 @@ class GroqPitchService(_BasePitchLLMService):
         pergunta: str,
         contexto: ContextoRAG,
         modelo: str | None = None,
+        ao_receber_reasoning: Callable[[str], None] | None = None,
+        ao_receber_conteudo: Callable[[str], None] | None = None,
     ) -> RespostaGeradaOllama:
-        """Gera resposta fundamentada via Groq Cloud e extrai métricas de usage."""
+        """Gera resposta fundamentada via Groq Cloud com streaming, raciocínio e métricas de usage."""
         modelo_ativo = self.selecionar_modelo_ativo(modelo)
         citacoes = extrair_citacoes_contexto(contexto)
         system_prompt, user_prompt, prompt_completo = self._montar_prompts_geracao(pergunta, contexto)
@@ -642,29 +762,63 @@ class GroqPitchService(_BasePitchLLMService):
                 prompt_enviado=prompt_completo,
             )
 
+        parser = _ThinkStreamParser()
+        usage: dict[str, Any] = {}
         try:
             payload = {
                 "model": modelo_ativo,
                 "temperature": 0.1,
+                "stream": True,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
             }
-            resp = httpx.post(
+            with httpx.stream(
+                "POST",
                 f"{self.base_url}/chat/completions",
                 headers=self._headers(),
                 json=payload,
                 timeout=self.timeout_s,
-            )
-            resp.raise_for_status()
-            dados = resp.json()
+            ) as resp:
+                resp.raise_for_status()
+                for linha in resp.iter_lines():
+                    if not linha or not linha.startswith("data:"):
+                        continue
+                    data_str = linha[5:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    chunk = json.loads(data_str)
+                    choices = chunk.get("choices") or []
+                    if choices:
+                        delta = choices[0].get("delta") or {}
+                        reasoning_delta = (
+                            delta.get("reasoning") or delta.get("reasoning_content") or ""
+                        )
+                        content_delta = delta.get("content") or ""
+                        mudou_r = parser.feed_reasoning(reasoning_delta)
+                        mudou_r2, mudou_c = parser.feed_content(content_delta)
+                        if (mudou_r or mudou_r2) and ao_receber_reasoning and parser.reasoning_text:
+                            ao_receber_reasoning(parser.reasoning_text)
+                        if mudou_c and ao_receber_conteudo and parser.content_text:
+                            ao_receber_conteudo(parser.content_text)
+
+                    if isinstance(chunk.get("usage"), dict):
+                        usage = chunk["usage"]
+                    elif isinstance(chunk.get("x_groq"), dict) and isinstance(
+                        chunk["x_groq"].get("usage"), dict
+                    ):
+                        usage = chunk["x_groq"]["usage"]
+
+            parser.flush()
+            if ao_receber_reasoning and parser.reasoning_text:
+                ao_receber_reasoning(parser.reasoning_text)
+            if ao_receber_conteudo and parser.content_text:
+                ao_receber_conteudo(parser.content_text)
+
             llm_ms = (time.perf_counter() - inicio) * 1000.0
 
-            msg = (dados.get("choices") or [{}])[0].get("message", {})
-            resposta_texto = _remover_bloco_think(msg.get("content") or "")
-
-            usage = dados.get("usage") or {}
+            resposta_texto = parser.content_text
             prompt_tokens = int(usage.get("prompt_tokens") or 0)
             eval_tokens = int(usage.get("completion_tokens") or 0)
             queue_s = float(usage.get("queue_time") or 0.0)
@@ -688,6 +842,7 @@ class GroqPitchService(_BasePitchLLMService):
             )
             return RespostaGeradaOllama(
                 resposta=resposta_texto or "Não foi possível gerar resposta com o modelo Groq selecionado.",
+                reasoning=parser.reasoning_text,
                 citacoes=citacoes,
                 metricas=metricas,
                 llm_ms=round(llm_ms, 2),

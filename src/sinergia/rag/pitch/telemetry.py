@@ -32,6 +32,7 @@ class TelemetriaTurno(BaseModel):
     id_turno: int = Field(..., description="Identificador único da mensagem da assistente")
     pergunta: str = Field(..., description="Pergunta original do usuário")
     resposta: str = Field(..., description="Resposta gerada pela LLM")
+    reasoning: str = Field(default="", description="Raciocínio emitido pelo modelo durante a geração")
     citacoes: list[str] = Field(default_factory=list, description="Pílulas de citação")
     roteamento: DecisaoRoteamento = Field(..., description="Decisão autônoma de ferramenta/base")
     tempos: TemposTurno = Field(..., description="Métricas de latência por etapa")

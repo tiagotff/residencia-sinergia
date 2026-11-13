@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -185,6 +186,8 @@ def executar_turno_rag(
     buscador: BuscadorHibrido,
     servico_llm: OllamaPitchService | GroqPitchService,
     ao_avancar_etapa: Callable[[str], None] | None = None,
+    ao_receber_reasoning: Callable[[str], None] | None = None,
+    ao_receber_conteudo: Callable[[str], None] | None = None,
 ) -> TelemetriaTurno:
     """Executa roteamento autônomo, busca híbrida instrumentada e geração na LLM ativa."""
     if ao_avancar_etapa:
@@ -208,6 +211,8 @@ def executar_turno_rag(
         pergunta=pergunta,
         contexto=resultado_rag.contexto,
         modelo=modelo_selecionado,
+        ao_receber_reasoning=ao_receber_reasoning,
+        ao_receber_conteudo=ao_receber_conteudo,
     )
 
     total_ms = (
@@ -223,6 +228,7 @@ def executar_turno_rag(
         id_turno=id_turno,
         pergunta=pergunta,
         resposta=resposta_llm.resposta,
+        reasoning=resposta_llm.reasoning,
         citacoes=resposta_llm.citacoes,
         roteamento=decisao,
         tempos=TemposTurno(
@@ -558,9 +564,9 @@ with hdr_title:
 with hdr_provider:
     usar_cloud_groq = st.toggle(
         "Cloud (Groq)",
-        value=False,
+        value=True,
         key="provider_cloud_toggle",
-        help="Alternar entre inferência Local (Ollama) e Cloud (Groq)",
+        help="Alternar entre inferência Cloud (Groq) e Local (Ollama)",
     )
 
 if usar_cloud_groq:
@@ -663,6 +669,9 @@ with col_chat:
                             args=(turno.id_turno,),
                         )
 
+                    if turno.reasoning:
+                        with st.expander("Raciocínio do modelo", icon=":material/psychology:"):
+                            st.markdown(turno.reasoning)
                     st.markdown(turno.resposta)
                     st.caption(
                         f"Tempo total: {turno.tempos.total_ms / 1000.0:.2f} s · Modelo: {turno.metricas_ollama.modelo}"
@@ -698,9 +707,38 @@ with col_chat:
                 expanded=True,
                 state="running",
             ) as status_box:
+                etapas_placeholder = st.container()
+                reasoning_placeholder = st.empty()
+                resposta_placeholder = st.empty()
+                throttle = {"reasoning": 0.0, "conteudo": 0.0}
+
                 def _atualizar_loading(etapa: str) -> None:
                     status_box.update(label=f":shimmer[{etapa}]", state="running")
-                    st.write(etapa)
+                    etapas_placeholder.write(etapa)
+
+                def _atualizar_reasoning(texto_reasoning: str) -> None:
+                    agora = time.monotonic()
+                    if agora - throttle["reasoning"] < 0.05:
+                        return
+                    throttle["reasoning"] = agora
+                    status_box.update(
+                        label=":shimmer[Pensando e gerando resposta...]",
+                        state="running",
+                    )
+                    with reasoning_placeholder.container():
+                        st.caption(":material/psychology: Raciocínio do modelo")
+                        st.markdown(texto_reasoning)
+
+                def _atualizar_conteudo(texto_conteudo: str) -> None:
+                    agora = time.monotonic()
+                    if agora - throttle["conteudo"] < 0.05:
+                        return
+                    throttle["conteudo"] = agora
+                    status_box.update(
+                        label=":shimmer[Escrevendo resposta...]",
+                        state="running",
+                    )
+                    resposta_placeholder.markdown(texto_conteudo)
 
                 turno_novo = executar_turno_rag(
                     pergunta=prompt_ativo,
@@ -708,7 +746,15 @@ with col_chat:
                     buscador=buscador,
                     servico_llm=servico_llm,
                     ao_avancar_etapa=_atualizar_loading,
+                    ao_receber_reasoning=_atualizar_reasoning,
+                    ao_receber_conteudo=_atualizar_conteudo,
                 )
+                if turno_novo.reasoning:
+                    with reasoning_placeholder.container():
+                        st.caption(":material/psychology: Raciocínio do modelo")
+                        st.markdown(turno_novo.reasoning)
+                if turno_novo.resposta:
+                    resposta_placeholder.markdown(turno_novo.resposta)
                 status_box.update(label="Resposta gerada", state="complete", expanded=False)
 
             st.session_state.turnos.append(turno_novo)
