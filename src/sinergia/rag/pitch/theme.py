@@ -83,6 +83,11 @@ def obter_css_monocromatico_light() -> str:
     color: {p["bg_principal"]};
   }}
 
+  [class*="st-key-chat_resp_card_selected_"],
+  [class*="st-key-chat_resp_card_selected_"] > div {{
+    border-color: {p["destaque_primario"]} !important;
+  }}
+
   .sinergia-kpi-card {{
     background-color: {p["bg_secundario"]};
     border: 1px solid {p["borda_sutil"]};

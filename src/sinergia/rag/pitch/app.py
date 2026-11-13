@@ -607,13 +607,6 @@ with hdr_model:
             f":material/info: Modelo `{modelo_selecionado}` não consta ativo nesta chave Groq (verifique permissões no Groq Console)."
         )
 
-# Capturar entrada do chat antes de renderizar as colunas
-prompt_ativo = st.chat_input(
-    "Faça uma pergunta ao colaborador...",
-    key="chat_input_pitch",
-    submit_mode="disable",
-)
-
 # Layout principal em duas colunas: Chat (esquerda) + Telemetria/Raio-X (direita)
 col_chat, col_panel = st.columns([7, 5], gap="large")
 
@@ -628,86 +621,79 @@ with col_panel:
         _renderizar_raio_x(turno_selecionado)
 
 with col_chat:
-    for idx_msg, msg in enumerate(st.session_state.messages):
-        if msg["role"] == "user":
-            with st.chat_message("user"):
-                st.write(msg["content"])
-        else:
-            turno: TelemetriaTurno = msg["turno"]
-            is_selected = st.session_state.selected_msg_id == turno.id_turno
-            with st.chat_message("assistant"), st.container(border=True):
-                c_badge, c_btn = st.columns([3, 1], vertical_alignment="center")
-                with c_badge:
-                    st.html(
-                        renderizar_badge_base(
-                            turno.roteamento.codigo_base,
-                            turno.roteamento.nome_base,
-                            ativo=is_selected,
-                        )
-                    )
-                with c_btn:
-                    st.button(
-                        "Inspecionando" if is_selected else "Inspecionar no Raio-X",
-                        key=f"inspect_btn_{turno.id_turno}_{idx_msg}",
-                        width="stretch",
-                        type="primary" if is_selected else "secondary",
-                        on_click=_selecionar_turno,
-                        args=(turno.id_turno,),
-                    )
+    # Container fixo com autoscroll=False + chat_input dentro da coluna evita o
+    # stAppScrollToBottomContainer global em stMain que puxa o scroll para baixo.
+    chat_box = st.container(height=540, autoscroll=False)
+    prompt_ativo = st.chat_input(
+        "Faça uma pergunta ao chatbot...",
+        key="chat_input_pitch",
+        submit_mode="disable",
+    )
 
-                st.markdown(turno.resposta)
-                st.caption(
-                    f"Tempo total: {turno.tempos.total_ms / 1000.0:.2f} s · Modelo: {turno.metricas_ollama.modelo}"
+    with chat_box:
+        for idx_msg, msg in enumerate(st.session_state.messages):
+            if msg["role"] == "user":
+                with st.chat_message("user"):
+                    st.write(msg["content"])
+            else:
+                turno: TelemetriaTurno = msg["turno"]
+                is_selected = st.session_state.selected_msg_id == turno.id_turno
+                card_key = (
+                    f"chat_resp_card_selected_{turno.id_turno}_{idx_msg}"
+                    if is_selected
+                    else f"chat_resp_card_{turno.id_turno}_{idx_msg}"
                 )
-                if turno.citacoes:
-                    st.html(renderizar_citacoes_html(turno.citacoes))
-                if turno.detalhes_trechos:
-                    st.caption("Abrir trecho no PDF original (BBox):")
-                    with st.container(horizontal=True):
-                        for idx_t, det in enumerate(turno.detalhes_trechos, start=1):
-                            secao_curta = det.metadados.secao or det.metadados.titulo
-                            if len(secao_curta) > 28:
-                                secao_curta = f"{secao_curta[:25]}..."
-                            pag_str = f"Pág. {det.metadados.pagina}" if det.metadados.pagina else "Pág. 1"
-                            if st.button(
-                                f"#{idx_t} · {secao_curta} ({pag_str})",
-                                icon=":material/find_in_page:",
-                                key=f"chat_pdf_btn_{turno.id_turno}_{idx_msg}_{idx_t}",
-                            ):
-                                _abrir_modal_trecho_pdf(det, idx_t)
+                with st.chat_message("assistant"), st.container(border=True, key=card_key):
+                    c_badge, c_btn = st.columns([3, 1], vertical_alignment="center")
+                    with c_badge:
+                        st.html(
+                            renderizar_badge_base(
+                                turno.roteamento.codigo_base,
+                                turno.roteamento.nome_base,
+                                ativo=is_selected,
+                            )
+                        )
+                    with c_btn:
+                        st.button(
+                            "Inspecionando" if is_selected else "Inspecionar no Raio-X",
+                            key=f"inspect_btn_{turno.id_turno}_{idx_msg}",
+                            width="stretch",
+                            type="primary" if is_selected else "secondary",
+                            on_click=_selecionar_turno,
+                            args=(turno.id_turno,),
+                        )
 
-    if prompt_ativo:
-        st.session_state.messages.append({"role": "user", "content": prompt_ativo})
-        with st.chat_message("user"):
-            st.write(prompt_ativo)
+                    st.markdown(turno.resposta)
+                    st.caption(
+                        f"Tempo total: {turno.tempos.total_ms / 1000.0:.2f} s · Modelo: {turno.metricas_ollama.modelo}"
+                    )
+                    if turno.citacoes:
+                        st.html(renderizar_citacoes_html(turno.citacoes))
+                    if turno.detalhes_trechos:
+                        st.caption("Abrir trecho no PDF original (BBox):")
+                        with st.container(horizontal=True):
+                            for idx_t, det in enumerate(turno.detalhes_trechos, start=1):
+                                secao_curta = det.metadados.secao or det.metadados.titulo
+                                if len(secao_curta) > 28:
+                                    secao_curta = f"{secao_curta[:25]}..."
+                                pag_str = (
+                                    f"Pág. {det.metadados.pagina}"
+                                    if det.metadados.pagina
+                                    else "Pág. 1"
+                                )
+                                if st.button(
+                                    f"#{idx_t} · {secao_curta} ({pag_str})",
+                                    icon=":material/find_in_page:",
+                                    key=f"chat_pdf_btn_{turno.id_turno}_{idx_msg}_{idx_t}",
+                                ):
+                                    _abrir_modal_trecho_pdf(det, idx_t)
 
-        with st.chat_message("assistant"), st.status(
-            ":shimmer[Consultando bases e gerando resposta...]",
-            expanded=True,
-            state="running",
-        ) as status_box:
-            def _atualizar_loading(etapa: str) -> None:
-                status_box.update(label=f":shimmer[{etapa}]", state="running")
-                st.write(etapa)
+        if prompt_ativo:
+            st.session_state.messages.append({"role": "user", "content": prompt_ativo})
+            with st.chat_message("user"):
+                st.write(prompt_ativo)
 
-            turno_novo = executar_turno_rag(
-                pergunta=prompt_ativo,
-                modelo_selecionado=modelo_selecionado,
-                buscador=buscador,
-                servico_llm=servico_llm,
-                ao_avancar_etapa=_atualizar_loading,
-            )
-            status_box.update(label="Resposta gerada", state="complete", expanded=False)
-
-        st.session_state.turnos.append(turno_novo)
-        st.session_state.messages.append(
-            {"role": "assistant", "id": turno_novo.id_turno, "turno": turno_novo}
-        )
-        st.session_state.selected_msg_id = None
-        st.rerun()
-
-        with st.chat_message("assistant"):
-            with st.status(
+            with st.chat_message("assistant"), st.status(
                 ":shimmer[Consultando bases e gerando resposta...]",
                 expanded=True,
                 state="running",
@@ -725,9 +711,9 @@ with col_chat:
                 )
                 status_box.update(label="Resposta gerada", state="complete", expanded=False)
 
-        st.session_state.turnos.append(turno_novo)
-        st.session_state.messages.append(
-            {"role": "assistant", "id": turno_novo.id_turno, "turno": turno_novo}
-        )
-        st.session_state.selected_msg_id = None
-        st.rerun()
+            st.session_state.turnos.append(turno_novo)
+            st.session_state.messages.append(
+                {"role": "assistant", "id": turno_novo.id_turno, "turno": turno_novo}
+            )
+            st.session_state.selected_msg_id = None
+            st.rerun()
