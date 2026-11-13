@@ -1,5 +1,6 @@
 """Testes unitários e de UI (AppTest) para a aplicação Streamlit SinergIA - RAG Demo."""
 
+import json
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -8,11 +9,15 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from sinergia.rag.interfaces import MetadadosTrecho, TrechoRecuperado
-from sinergia.rag.pitch.app import carregar_trechos_fallback_mocks
+from sinergia.rag.pitch.app import carregar_trechos_fallback_mocks, executar_turno_rag
 from sinergia.rag.pitch.ollama_service import (
     PRESETS_MODELOS_GROQ,
     PRESETS_MODELOS_LOCAL,
+    ChamadaFerramentaRAG,
+    DecisaoRoteamento,
     GroqPitchService,
+    MetricasOllama,
+    RespostaGeradaOllama,
 )
 from sinergia.rag.retrievers import BuscadorHibrido
 
@@ -25,6 +30,17 @@ def _fake_http_response(payload: dict) -> MagicMock:
     resp.json.return_value = payload
     resp.raise_for_status.return_value = None
     return resp
+
+
+def _fake_stream_response(lines: list[str]) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.raise_for_status.return_value = None
+    resp.iter_lines.return_value = iter(lines)
+    cm = MagicMock()
+    cm.__enter__.return_value = resp
+    cm.__exit__.return_value = False
+    return cm
 
 
 class TestPitchApp(unittest.TestCase):
@@ -40,48 +56,57 @@ class TestPitchApp(unittest.TestCase):
         bases_carregadas = {t.metadados.id_base for t in trechos}
         self.assertEqual(bases_carregadas, {1, 2, 3, 4, 5})
 
+    @patch("sinergia.rag.pitch.ollama_service.httpx.stream")
     @patch("sinergia.rag.pitch.ollama_service.httpx.post")
     @patch("sinergia.rag.pitch.ollama_service.httpx.get")
     @patch("sinergia.rag.pitch.app._banco_disponivel_com_dados", return_value=False)
     def test_fluxo_completo_apptest_visao_global_e_raio_x(
-        self, mock_pg_check, mock_http_get, mock_http_post
+        self, mock_pg_check, mock_http_get, mock_http_post, mock_http_stream
     ):
-        mock_http_get.return_value = _fake_http_response(
-            {"models": [{"name": "qwen2.5:3b"}, {"name": "qwen3.5:4b"}]}
-        )
-        mock_http_post.side_effect = [
-            # 1) Roteamento autônomo
-            _fake_http_response(
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": "",
-                        "tool_calls": [
-                            {
-                                "function": {
-                                    "name": "ferramenta_busca_pausas",
-                                    "arguments": {"query": "pausa digitação NR-17"},
-                                }
+        def _dispatch_get(url, **_kwargs):
+            if "api.groq.com" in url:
+                return _fake_http_response(
+                    {"data": [{"id": "qwen/qwen3.8-27b"}, {"id": "openai/gpt-oss-20b"}]}
+                )
+            return _fake_http_response(
+                {"models": [{"name": "qwen2.5:3b"}, {"name": "qwen3.5:4b"}]}
+            )
+
+        mock_http_get.side_effect = _dispatch_get
+        mock_http_post.return_value = _fake_http_response(
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "ferramenta_busca_pausas",
+                                "arguments": {"query": "pausa digitação NR-17"},
                             }
-                        ],
+                        }
+                    ],
+                }
+            }
+        )
+        mock_http_stream.return_value = _fake_stream_response(
+            [
+                json.dumps(
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "Conforme a NR-17 (Item 17.6.4), a pausa é de 10 minutos a cada 50 minutos.",
+                        },
+                        "done": True,
+                        "prompt_eval_count": 450,
+                        "eval_count": 48,
+                        "load_duration": 10_000_000,
+                        "eval_duration": 800_000_000,
+                        "total_duration": 900_000_000,
                     }
-                }
-            ),
-            # 2) Geração fundamentada
-            _fake_http_response(
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": "Conforme a NR-17 (Item 17.6.4), a pausa é de 10 minutos a cada 50 minutos.",
-                    },
-                    "prompt_eval_count": 450,
-                    "eval_count": 48,
-                    "load_duration": 10_000_000,
-                    "eval_duration": 800_000_000,
-                    "total_duration": 900_000_000,
-                }
-            ),
-        ]
+                )
+            ]
+        )
 
         mock_emb = MagicMock()
         mock_emb.model_name = "tardellirs/colibri-embed-ptbr"
@@ -118,9 +143,11 @@ class TestPitchApp(unittest.TestCase):
             at = AppTest.from_file(APP_PATH, default_timeout=15).run()
             self.assertFalse(at.exception)
 
-            # Toggle Local/Cloud + seletor de modelo Ollama (instalados + presets) presentes; sem sliders
+            # Toggle Local/Cloud inicia ativo (Groq); alternar para Local (Ollama) para testar seletor local
             self.assertEqual(len(at.toggle), 1)
-            self.assertFalse(at.toggle(key="provider_cloud_toggle").value)
+            self.assertTrue(at.toggle(key="provider_cloud_toggle").value)
+            at.toggle(key="provider_cloud_toggle").set_value(False).run()
+            self.assertFalse(at.exception)
             self.assertEqual(len(at.selectbox), 1)
             self.assertEqual(
                 at.selectbox[0].options,
@@ -171,11 +198,12 @@ class TestPitchApp(unittest.TestCase):
             subheaders_after = [s.value for s in at.subheader]
             self.assertIn("Métricas agregadas do pipeline", subheaders_after)
 
+    @patch("sinergia.rag.pitch.ollama_service.httpx.stream")
     @patch("sinergia.rag.pitch.ollama_service.httpx.post")
     @patch("sinergia.rag.pitch.ollama_service.httpx.get")
     @patch("sinergia.rag.pitch.app._banco_disponivel_com_dados", return_value=False)
     def test_toggle_cloud_groq_alterna_provedor_e_executa_consulta(
-        self, mock_pg_check, mock_http_get, mock_http_post
+        self, mock_pg_check, mock_http_get, mock_http_post, mock_http_stream
     ):
         def _dispatch_get(url, **_kwargs):
             if "api.groq.com" in url:
@@ -185,46 +213,55 @@ class TestPitchApp(unittest.TestCase):
             return _fake_http_response({"models": [{"name": "qwen2.5:3b"}]})
 
         mock_http_get.side_effect = _dispatch_get
-        mock_http_post.side_effect = [
-            _fake_http_response(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "role": "assistant",
-                                "tool_calls": [
-                                    {
-                                        "function": {
-                                            "name": "ferramenta_busca_pausas",
-                                            "arguments": '{"query": "pausa digitação NR-17"}',
-                                        }
+        mock_http_post.return_value = _fake_http_response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": "ferramenta_busca_pausas",
+                                        "arguments": '{"query": "pausa digitação NR-17"}',
                                     }
-                                ],
-                            }
+                                }
+                            ],
                         }
-                    ]
-                }
-            ),
-            _fake_http_response(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "role": "assistant",
-                                "content": "Resposta via Groq Cloud: pausa de 10 minutos (NR-17).",
+                    }
+                ]
+            }
+        )
+        mock_http_stream.return_value = _fake_stream_response(
+            [
+                "data: "
+                + json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "content": "Resposta via Groq Cloud: pausa de 10 minutos (NR-17).",
+                                }
                             }
-                        }
-                    ],
-                    "usage": {
-                        "prompt_tokens": 210,
-                        "completion_tokens": 30,
-                        "queue_time": 0.02,
-                        "completion_time": 0.10,
-                        "total_time": 0.12,
-                    },
-                }
-            ),
-        ]
+                        ]
+                    }
+                ),
+                "data: "
+                + json.dumps(
+                    {
+                        "choices": [],
+                        "usage": {
+                            "prompt_tokens": 210,
+                            "completion_tokens": 30,
+                            "queue_time": 0.02,
+                            "completion_time": 0.10,
+                            "total_time": 0.12,
+                        },
+                    }
+                ),
+                "data: [DONE]",
+            ]
+        )
 
         mock_emb = MagicMock()
         mock_emb.model_name = "tardellirs/colibri-embed-ptbr"
@@ -285,6 +322,104 @@ class TestPitchApp(unittest.TestCase):
             self.assertIn("Resposta via Groq Cloud", markdown_text)
             ultimo_turno = at.session_state["turnos"][-1]
             self.assertEqual(ultimo_turno.metricas_ollama.modelo, "openai/gpt-oss-20b")
+
+    def test_executar_turno_rag_mescla_multiplas_bases_por_peso(self):
+        mock_emb = MagicMock()
+        mock_emb.model_name = "tardellirs/colibri-embed-ptbr"
+        mock_emb.gerar_embedding.return_value = [0.02] * 768
+
+        buscador_mock = BuscadorHibrido(gerador_embeddings=mock_emb)
+        trechos_teste = [
+            TrechoRecuperado(
+                id_trecho=i,
+                conteudo=f"Regra PCMSO saúde ocupacional ASO número {i}.",
+                metadados=MetadadosTrecho(
+                    id_documento=4,
+                    titulo="PCMSO NR-7",
+                    fonte="NR-7",
+                    versao="2024.1",
+                    secao=f"Item 7.{i}",
+                    pagina=i,
+                    id_base=4,
+                    vigente=True,
+                ),
+            )
+            for i in range(1, 6)
+        ] + [
+            TrechoRecuperado(
+                id_trecho=10 + i,
+                conteudo=f"Ficha EPI luva CA número {i}.",
+                metadados=MetadadosTrecho(
+                    id_documento=5,
+                    titulo="EPI NR-6",
+                    fonte="NR-6",
+                    versao="2024.1",
+                    secao=f"CA {i}",
+                    pagina=i,
+                    id_base=5,
+                    vigente=True,
+                ),
+            )
+            for i in range(1, 5)
+        ]
+        buscador_mock.adicionar_trechos_memoria(trechos_teste)
+
+        servico_mock = MagicMock()
+        servico_mock.decidir_base_autonomamente.return_value = DecisaoRoteamento(
+            id_base=4,
+            codigo_base="F4",
+            nome_base="Saúde Ocupacional (PCMSO)",
+            tool_name="ferramenta_busca_saude_ocupacional",
+            query_busca="PCMSO ASO",
+            modo_roteamento="tool_calling",
+            roteamento_ms=12.0,
+            chamadas=[
+                ChamadaFerramentaRAG(
+                    id_base=4,
+                    codigo_base="F4",
+                    nome_base="Saúde Ocupacional (PCMSO)",
+                    tool_name="ferramenta_busca_saude_ocupacional",
+                    query_busca="PCMSO ASO",
+                    peso=0.75,
+                    limite_trechos=4,
+                ),
+                ChamadaFerramentaRAG(
+                    id_base=5,
+                    codigo_base="F5",
+                    nome_base="EPIs e Fichas de CA (NR-6)",
+                    tool_name="ferramenta_busca_epis",
+                    query_busca="EPI luva CA",
+                    peso=0.25,
+                    limite_trechos=2,
+                ),
+            ],
+        )
+
+        def _fake_gerar(pergunta, contexto, **_kwargs):
+            return RespostaGeradaOllama(
+                resposta="Resposta mesclada PCMSO + EPI.",
+                citacoes=[],
+                metricas=MetricasOllama(modelo="teste"),
+                llm_ms=10.0,
+                prompt_enviado=contexto.formatar_para_prompt(),
+            )
+
+        servico_mock.gerar_resposta_fundamentada.side_effect = _fake_gerar
+
+        st.session_state.next_msg_id = 1
+        turno = executar_turno_rag(
+            pergunta="Dúvida sobre PCMSO ASO e qual EPI usar",
+            modelo_selecionado="teste",
+            buscador=buscador_mock,
+            servico_llm=servico_mock,
+        )
+
+        bases_recuperadas = [d.metadados.id_base for d in turno.detalhes_trechos]
+        self.assertEqual(bases_recuperadas.count(4), 4)
+        self.assertEqual(bases_recuperadas.count(5), 2)
+        self.assertIn("PCMSO NR-7", turno.prompt_enviado)
+        self.assertIn("EPI NR-6", turno.prompt_enviado)
+        self.assertEqual(turno.roteamento.codigos_combinados, "F4+F5")
 
 
 if __name__ == "__main__":

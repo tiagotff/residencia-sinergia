@@ -21,6 +21,17 @@ def _mock_response(payload: dict, status_code: int = 200) -> MagicMock:
     return resp
 
 
+def _mock_stream_response(lines: list[str], status_code: int = 200) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.raise_for_status.return_value = None
+    resp.iter_lines.return_value = iter(lines)
+    cm = MagicMock()
+    cm.__enter__.return_value = resp
+    cm.__exit__.return_value = False
+    return cm
+
+
 class TestOllamaPitchService(unittest.TestCase):
     def setUp(self):
         self.service = OllamaPitchService(base_url="http://localhost:11434")
@@ -92,22 +103,27 @@ class TestOllamaPitchService(unittest.TestCase):
         self.assertEqual(decisao.query_busca, "falta casamento Art 473 CLT")
         self.assertEqual(decisao.modo_roteamento, "json_fallback")
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
+    @patch("sinergia.rag.pitch.ollama_service.httpx.stream")
     @patch("sinergia.rag.pitch.ollama_service.httpx.get")
-    def test_gerar_resposta_fundamentada_extrai_metricas_nativas(self, mock_get, mock_post):
+    def test_gerar_resposta_fundamentada_extrai_metricas_nativas(self, mock_get, mock_stream):
         mock_get.return_value = _mock_response({"models": [{"name": "qwen2.5:3b"}]})
-        mock_post.return_value = _mock_response(
-            {
-                "message": {
-                    "role": "assistant",
-                    "content": "De acordo com a NR-17 (Item 17.6.4, Pág. 4), a pausa é de 10 minutos.",
-                },
-                "prompt_eval_count": 512,
-                "eval_count": 64,
-                "load_duration": 15_000_000,  # 15 ms
-                "eval_duration": 1_000_000_000,  # 1000 ms -> 64.0 tok/s
-                "total_duration": 1_200_000_000,  # 1200 ms
-            }
+        mock_stream.return_value = _mock_stream_response(
+            [
+                json.dumps(
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "De acordo com a NR-17 (Item 17.6.4, Pág. 4), a pausa é de 10 minutos.",
+                        },
+                        "done": True,
+                        "prompt_eval_count": 512,
+                        "eval_count": 64,
+                        "load_duration": 15_000_000,  # 15 ms
+                        "eval_duration": 1_000_000_000,  # 1000 ms -> 64.0 tok/s
+                        "total_duration": 1_200_000_000,  # 1200 ms
+                    }
+                )
+            ]
         )
 
         contexto = ContextoRAG(
@@ -164,6 +180,124 @@ class TestOllamaPitchService(unittest.TestCase):
         self.assertTrue(self.service.modelo_esta_instalado("qwen2.5:3b"))
         self.assertFalse(self.service.modelo_esta_instalado("mimo-v2.6:9b-thinking"))
 
+    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
+    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
+    def test_roteamento_multi_tool_com_pesos_e_alocacao_proporcional(self, mock_get, mock_post):
+        mock_get.return_value = _mock_response({"models": [{"name": "qwen2.5:3b"}]})
+        mock_post.return_value = _mock_response(
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "ferramenta_busca_epis",
+                                "arguments": {"query": "luva nitrílica CA", "peso": 0.25},
+                            }
+                        },
+                        {
+                            "function": {
+                                "name": "ferramenta_busca_saude_ocupacional",
+                                "arguments": {"query": "ASO exame periódico PCMSO", "peso": 0.75},
+                            }
+                        },
+                    ],
+                }
+            }
+        )
+
+        decisao = self.service.decidir_base_autonomamente(
+            "Quero saber detalhes do ASO periódico no PCMSO e também o CA da luva."
+        )
+        self.assertTrue(decisao.multi_base)
+        self.assertEqual(decisao.codigos_combinados, "F4+F5")
+        self.assertEqual(len(decisao.chamadas), 2)
+        # Ordenado por peso decrescente: F4 (75%) -> 4 trechos, F5 (25%) -> 2 trechos
+        self.assertEqual(decisao.chamadas[0].id_base, 4)
+        self.assertAlmostEqual(decisao.chamadas[0].peso, 0.75)
+        self.assertEqual(decisao.chamadas[0].limite_trechos, 4)
+        self.assertEqual(decisao.chamadas[1].id_base, 5)
+        self.assertAlmostEqual(decisao.chamadas[1].peso, 0.25)
+        self.assertEqual(decisao.chamadas[1].limite_trechos, 2)
+
+    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
+    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
+    def test_roteamento_via_ferramenta_busca_multiplas_bases(self, mock_get, mock_post):
+        mock_get.return_value = _mock_response({"models": [{"name": "qwen2.5:3b"}]})
+        mock_post.return_value = _mock_response(
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "ferramenta_busca_multiplas_bases",
+                                "arguments": {
+                                    "consultas": [
+                                        {"id_base": 4, "query": "exame periódico PCMSO", "peso": 0.8},
+                                        {"id_base": 5, "query": "luva EPI CA", "peso": 0.2},
+                                    ]
+                                },
+                            }
+                        }
+                    ],
+                }
+            }
+        )
+
+        decisao = self.service.decidir_base_autonomamente(
+            "Quero saber principalmente sobre exame periódico do PCMSO e qual luva usar."
+        )
+        self.assertTrue(decisao.multi_base)
+        self.assertEqual(decisao.modo_roteamento, "tool_calling")
+        self.assertEqual(decisao.codigos_combinados, "F4+F5")
+        self.assertEqual(decisao.chamadas[0].tool_name, "ferramenta_busca_saude_ocupacional")
+        self.assertEqual(decisao.chamadas[0].limite_trechos, 4)
+        self.assertEqual(decisao.chamadas[1].tool_name, "ferramenta_busca_epis")
+        self.assertEqual(decisao.chamadas[1].limite_trechos, 2)
+
+    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
+    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
+    def test_roteamento_multi_base_json_fallback_e_heuristica(self, mock_get, mock_post):
+        mock_get.return_value = _mock_response({"models": [{"name": "llama3.2:1b"}]})
+        mock_post.side_effect = [
+            _mock_response({"message": {"role": "assistant", "content": ""}}),
+            _mock_response(
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": json.dumps(
+                            {
+                                "consultas": [
+                                    {"id_base": 4, "query": "exame periódico PCMSO", "peso": 0.8},
+                                    {"id_base": 5, "query": "CA luva EPI", "peso": 0.2},
+                                ]
+                            }
+                        ),
+                    }
+                }
+            ),
+        ]
+
+        decisao_json = self.service.decidir_base_autonomamente("PCMSO e EPI")
+        self.assertEqual(decisao_json.modo_roteamento, "json_fallback")
+        self.assertEqual(len(decisao_json.chamadas), 2)
+        self.assertEqual(decisao_json.chamadas[0].id_base, 4)
+        self.assertEqual(decisao_json.chamadas[0].limite_trechos, 4)
+        self.assertEqual(decisao_json.chamadas[1].id_base, 5)
+        self.assertEqual(decisao_json.chamadas[1].limite_trechos, 2)
+
+        # Heurística com múltiplos termos de saúde (3 matches) e 1 de EPI (1 match)
+        decisao_heur = self.service._decidir_heuristica(
+            "Como funciona o exame periódico ASO de saúde no PCMSO e qual epi usar?", 0.0
+        )
+        self.assertEqual(decisao_heur.modo_roteamento, "heuristic_fallback")
+        self.assertEqual(len(decisao_heur.chamadas), 2)
+        self.assertEqual(decisao_heur.chamadas[0].id_base, 4)
+        self.assertGreater(decisao_heur.chamadas[0].limite_trechos, decisao_heur.chamadas[1].limite_trechos)
+
 
 class TestGroqPitchService(unittest.TestCase):
     def setUp(self):
@@ -217,54 +351,62 @@ class TestGroqPitchService(unittest.TestCase):
             "llama-3.1-8b-instant",
         )
 
+    @patch("sinergia.rag.pitch.ollama_service.httpx.stream")
     @patch("sinergia.rag.pitch.ollama_service.httpx.post")
     @patch("sinergia.rag.pitch.ollama_service.httpx.get")
-    def test_groq_roteamento_e_geracao_com_metricas(self, mock_get, mock_post):
+    def test_groq_roteamento_e_geracao_com_metricas(self, mock_get, mock_post, mock_stream):
         mock_get.return_value = _mock_response(
             {"data": [{"id": "qwen/qwen3.8-27b"}, {"id": "openai/gpt-oss-20b"}]}
         )
-        mock_post.side_effect = [
-            # 1) Roteamento tool calling
-            _mock_response(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "role": "assistant",
-                                "tool_calls": [
-                                    {
-                                        "function": {
-                                            "name": "ferramenta_busca_direitos",
-                                            "arguments": '{"query": "falta casamento CLT Art 473"}',
-                                        }
+        mock_post.return_value = _mock_response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": "ferramenta_busca_direitos",
+                                        "arguments": '{"query": "falta casamento CLT Art 473"}',
                                     }
-                                ],
-                            }
+                                }
+                            ],
                         }
-                    ]
-                }
-            ),
-            # 2) Geração com bloco <think> e usage Groq
-            _mock_response(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "role": "assistant",
-                                "content": "<think>Analisando Art. 473...</think>Até 3 dias consecutivos conforme Art. 473, II da CLT.",
+                    }
+                ]
+            }
+        )
+        mock_stream.return_value = _mock_stream_response(
+            [
+                "data: "
+                + json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "content": "<think>Analisando Art. 473...</think>Até 3 dias consecutivos conforme Art. 473, II da CLT.",
+                                }
                             }
-                        }
-                    ],
-                    "usage": {
-                        "prompt_tokens": 320,
-                        "completion_tokens": 45,
-                        "queue_time": 0.05,
-                        "completion_time": 0.15,
-                        "total_time": 0.20,
-                    },
-                }
-            ),
-        ]
+                        ]
+                    }
+                ),
+                "data: "
+                + json.dumps(
+                    {
+                        "choices": [],
+                        "usage": {
+                            "prompt_tokens": 320,
+                            "completion_tokens": 45,
+                            "queue_time": 0.05,
+                            "completion_time": 0.15,
+                            "total_time": 0.20,
+                        },
+                    }
+                ),
+                "data: [DONE]",
+            ]
+        )
 
         decisao = self.groq.decidir_base_autonomamente(
             "Quantos dias de falta por casamento?", modelo="qwen/qwen3.8-27b"
