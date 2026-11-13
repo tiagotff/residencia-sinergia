@@ -2,17 +2,27 @@
 
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import streamlit as st
 
 from sinergia.rag.chunking import chunking_documento_pdf
 from sinergia.rag.ingestao import MAPA_MOCKS_PADRAO, mapear_mock_para_metadados
-from sinergia.rag.interfaces import MetadadosTrecho, TrechoRecuperado
+from sinergia.rag.interfaces import (
+    DetalheScoreTrecho,
+    MetadadosTrecho,
+    TrechoRecuperado,
+)
 from sinergia.rag.pitch.ollama_service import (
     MAPA_BASES_FERRAMENTAS,
     GroqPitchService,
     OllamaPitchService,
+)
+from sinergia.rag.pitch.pdf_preview import (
+    extrair_bboxes_trecho,
+    renderizar_bboxes_em_pdf_bytes,
+    resolver_caminho_pdf,
 )
 from sinergia.rag.pitch.telemetry import (
     TelemetriaTurno,
@@ -30,24 +40,6 @@ from sinergia.rag.pitch.theme import (
 from sinergia.rag.retrievers import BuscadorHibrido
 
 DIRETORIO_MOCKS = Path(__file__).resolve().parent.parent / "data" / "mocks"
-
-PERGUNTAS_RAPIDAS: list[dict[str, str]] = [
-    {
-        "key": "quick_nr17",
-        "label": "Pausa digitação (NR-17)",
-        "query": "Qual deve ser a pausa para atividades de digitação contínua?",
-    },
-    {
-        "key": "quick_epi",
-        "label": "Código CA 12345 (NR-6)",
-        "query": "Qual a validade e aplicação do EPI com CA 12345?",
-    },
-    {
-        "key": "quick_clt",
-        "label": "Falta casamento (CLT)",
-        "query": "Quantos dias de falta justificada tenho direito por casamento?",
-    },
-]
 
 
 def _banco_disponivel_com_dados(database_url: str) -> bool:
@@ -177,8 +169,6 @@ def inicializar_estado_sessao() -> None:
         st.session_state.selected_msg_id = None
     if "next_msg_id" not in st.session_state:
         st.session_state.next_msg_id = 1
-    if "pending_quick_prompt" not in st.session_state:
-        st.session_state.pending_quick_prompt = None
 
 
 def _selecionar_turno(id_turno: int | None) -> None:
@@ -189,24 +179,31 @@ def _selecionar_turno(id_turno: int | None) -> None:
         st.session_state.selected_msg_id = id_turno
 
 
-def _disparar_pergunta_rapida(texto: str) -> None:
-    """Callback dos botões de pergunta rápida no cabeçalho."""
-    st.session_state.pending_quick_prompt = texto
-
-
 def executar_turno_rag(
     pergunta: str,
     modelo_selecionado: str | None,
     buscador: BuscadorHibrido,
     servico_llm: OllamaPitchService | GroqPitchService,
+    ao_avancar_etapa: Callable[[str], None] | None = None,
 ) -> TelemetriaTurno:
     """Executa roteamento autônomo, busca híbrida instrumentada e geração na LLM ativa."""
+    if ao_avancar_etapa:
+        ao_avancar_etapa("Roteando pergunta autonomamente entre as bases F1..F5...")
     decisao = servico_llm.decidir_base_autonomamente(pergunta, modelo=modelo_selecionado)
+
+    if ao_avancar_etapa:
+        ao_avancar_etapa(
+            f"Buscando trechos na base **{decisao.codigo_base}** ({decisao.nome_base})..."
+        )
     resultado_rag = buscador.buscar_com_telemetria(
         query=decisao.query_busca,
         id_base=decisao.id_base,
         limite=4,
     )
+
+    if ao_avancar_etapa:
+        modelo_label = modelo_selecionado or "LLM ativa"
+        ao_avancar_etapa(f"Gerando resposta fundamentada com `{modelo_label}`...")
     resposta_llm = servico_llm.gerar_resposta_fundamentada(
         pergunta=pergunta,
         contexto=resultado_rag.contexto,
@@ -240,6 +237,104 @@ def executar_turno_rag(
         metricas_ollama=resposta_llm.metricas,
         prompt_enviado=resposta_llm.prompt_enviado,
     )
+
+
+@st.cache_data(max_entries=64)
+def _obter_imagens_pdf_cache(
+    caminho_pdf: str,
+    pagina: int,
+    bboxes_tuplas: tuple[tuple[float, float, float, float], ...],
+) -> tuple[bytes, bytes, int]:
+    """Cacheia as imagens PNG de recorte e página inteira geradas via PyMuPDF."""
+    return renderizar_bboxes_em_pdf_bytes(
+        caminho_pdf=caminho_pdf,
+        pagina=pagina,
+        bboxes_tuplas=bboxes_tuplas,
+    )
+
+
+@st.dialog("Trecho no documento original (PDF)", width="large", icon=":material/picture_as_pdf:")
+def _abrir_modal_trecho_pdf(detalhe: DetalheScoreTrecho, indice_chunk: int = 1) -> None:
+    """Exibe o trecho localizado no PDF original com highlight a partir da sua BBox."""
+    meta = detalhe.metadados
+    caminho_pdf = resolver_caminho_pdf(meta, DIRETORIO_MOCKS)
+    if caminho_pdf is None or not caminho_pdf.is_file():
+        st.warning(
+            "Arquivo PDF original não encontrado para este trecho.",
+            title="PDF indisponível",
+        )
+        return
+
+    bboxes = extrair_bboxes_trecho(meta)
+    pagina_alvo = meta.pagina or (bboxes[0].pagina if bboxes else 1)
+    bboxes_pag = [b for b in bboxes if b.pagina == pagina_alvo] or bboxes
+    tuplas = tuple((b.x0, b.y0, b.x1, b.y1) for b in bboxes_pag)
+
+    crop_png, pagina_png, total_paginas = _obter_imagens_pdf_cache(
+        str(caminho_pdf),
+        pagina_alvo,
+        tuplas,
+    )
+
+    secao_label = meta.secao or "Geral"
+    st.markdown(
+        f"**{meta.titulo}** (v{meta.versao}) · {secao_label} · "
+        f"Página **{pagina_alvo}** de **{total_paginas}** · `RRF: {detalhe.rrf_score:.4f}`"
+    )
+    if meta.breadcrumb:
+        st.caption(meta.breadcrumb)
+
+    if bboxes_pag:
+        coords_str = ", ".join(
+            f"[x0={b.x0:.1f}, y0={b.y0:.1f}, x1={b.x1:.1f}, y1={b.y1:.1f}]"
+            for b in bboxes_pag
+        )
+        st.caption(f"Arquivo: `{caminho_pdf.name}` · BBox: `{coords_str}`")
+    else:
+        st.caption(f"Arquivo: `{caminho_pdf.name}` · Sem coordenadas BBox registradas para este trecho.")
+
+    modo_visao = st.segmented_control(
+        "Modo de visualização",
+        options=["Recorte focado (BBox)", "Página inteira destacada", "Lado a lado"],
+        default="Recorte focado (BBox)",
+        required=True,
+        key=f"seg_visao_pdf_{detalhe.id_trecho}_{indice_chunk}",
+        label_visibility="collapsed",
+    ) or "Recorte focado (BBox)"
+
+    if modo_visao == "Recorte focado (BBox)":
+        st.image(
+            crop_png,
+            caption=f"Recorte ampliado com highlight — {meta.titulo}, pág. {pagina_alvo}",
+            alt=f"Recorte do PDF {caminho_pdf.name} na página {pagina_alvo} com o trecho destacado",
+            width="stretch",
+        )
+    elif modo_visao == "Página inteira destacada":
+        st.image(
+            pagina_png,
+            caption=f"Página {pagina_alvo} de {total_paginas} — {caminho_pdf.name}",
+            alt=f"Página {pagina_alvo} do PDF {caminho_pdf.name} com o trecho destacado",
+            width="stretch",
+        )
+    else:
+        col_crop, col_full = st.columns([1.15, 1], gap="medium")
+        with col_crop:
+            st.image(
+                crop_png,
+                caption="Recorte focado (BBox)",
+                alt=f"Recorte do PDF {caminho_pdf.name} na página {pagina_alvo}",
+                width="stretch",
+            )
+        with col_full:
+            st.image(
+                pagina_png,
+                caption=f"Página inteira ({pagina_alvo}/{total_paginas})",
+                alt=f"Página inteira {pagina_alvo} do PDF {caminho_pdf.name}",
+                width="stretch",
+            )
+
+    with st.expander("Ver texto extraído do chunk"):
+        st.text(detalhe.conteudo)
 
 
 def _renderizar_visao_global(turnos: list[TelemetriaTurno]) -> None:
@@ -295,7 +390,7 @@ def _renderizar_visao_global(turnos: list[TelemetriaTurno]) -> None:
 
     st.markdown("**Histórico de consultas (clique para abrir o Raio-X)**")
     if not turnos:
-        st.caption("Envie uma pergunta no chat ou use os botões rápidos acima para iniciar.")
+        st.caption("Envie uma pergunta no chat para iniciar.")
     else:
         for turno in reversed(turnos):
             rot = turno.roteamento
@@ -346,9 +441,21 @@ def _renderizar_raio_x(turno: TelemetriaTurno) -> None:
         for idx, det in enumerate(turno.detalhes_trechos, start=1):
             with st.container(border=True):
                 meta = det.metadados
-                st.markdown(f"**#{idx} · {meta.titulo}** ({meta.secao or 'Geral'}) — `RRF: {det.rrf_score:.4f}`")
-                if meta.breadcrumb:
-                    st.caption(meta.breadcrumb)
+                h_info, h_pdf = st.columns([3, 1], vertical_alignment="center")
+                with h_info:
+                    st.markdown(
+                        f"**#{idx} · {meta.titulo}** ({meta.secao or 'Geral'}) — `RRF: {det.rrf_score:.4f}`"
+                    )
+                    if meta.breadcrumb:
+                        st.caption(meta.breadcrumb)
+                with h_pdf:
+                    if st.button(
+                        "Ver no PDF",
+                        icon=":material/picture_as_pdf:",
+                        key=f"raiox_pdf_btn_{turno.id_turno}_{idx}",
+                        width="stretch",
+                    ):
+                        _abrir_modal_trecho_pdf(det, idx)
                 c1, c2 = st.columns(2)
                 dense_rank_str = f"#{det.dense_rank}" if det.dense_rank is not None else "N/A"
                 lex_rank_str = f"#{det.lex_rank}" if det.lex_rank is not None else "N/A"
@@ -437,9 +544,9 @@ inicializar_estado_sessao()
 
 buscador = obter_buscador_pitch()
 
-# Cabeçalho limpo: título, toggle Local/Cloud (Groq), seletor de modelo e botões rápidos
-hdr_title, hdr_provider, hdr_model, hdr_quick = st.columns(
-    [3.5, 1.5, 2.2, 3.8], vertical_alignment="center"
+# Cabeçalho limpo: título, toggle Local/Cloud (Groq) e seletor de modelo
+hdr_title, hdr_provider, hdr_model = st.columns(
+    [5.5, 1.5, 3.0], vertical_alignment="center"
 )
 with hdr_title:
     st.html(
@@ -500,40 +607,25 @@ with hdr_model:
             f":material/info: Modelo `{modelo_selecionado}` não consta ativo nesta chave Groq (verifique permissões no Groq Console)."
         )
 
-with hdr_quick:
-    q_cols = st.columns(len(PERGUNTAS_RAPIDAS))
-    for col_q, item in zip(q_cols, PERGUNTAS_RAPIDAS):
-        with col_q:
-            st.button(
-                item["label"],
-                key=item["key"],
-                width="stretch",
-                on_click=_disparar_pergunta_rapida,
-                args=(item["query"],),
-            )
-
-# Capturar entrada do chat ou botão rápido antes de renderizar as colunas
-prompt_digitado = st.chat_input("Faça uma pergunta ao colaborador...", key="chat_input_pitch")
-prompt_ativo = prompt_digitado or st.session_state.pending_quick_prompt
-if st.session_state.pending_quick_prompt:
-    st.session_state.pending_quick_prompt = None
-
-if prompt_ativo:
-    st.session_state.messages.append({"role": "user", "content": prompt_ativo})
-    turno_novo = executar_turno_rag(
-        pergunta=prompt_ativo,
-        modelo_selecionado=modelo_selecionado,
-        buscador=buscador,
-        servico_llm=servico_llm,
-    )
-    st.session_state.turnos.append(turno_novo)
-    st.session_state.messages.append(
-        {"role": "assistant", "id": turno_novo.id_turno, "turno": turno_novo}
-    )
-    st.session_state.selected_msg_id = None
+# Capturar entrada do chat antes de renderizar as colunas
+prompt_ativo = st.chat_input(
+    "Faça uma pergunta ao colaborador...",
+    key="chat_input_pitch",
+    submit_mode="disable",
+)
 
 # Layout principal em duas colunas: Chat (esquerda) + Telemetria/Raio-X (direita)
 col_chat, col_panel = st.columns([7, 5], gap="large")
+
+with col_panel:
+    turno_selecionado: TelemetriaTurno | None = next(
+        (t for t in st.session_state.turnos if t.id_turno == st.session_state.selected_msg_id),
+        None,
+    )
+    if turno_selecionado is None:
+        _renderizar_visao_global(st.session_state.turnos)
+    else:
+        _renderizar_raio_x(turno_selecionado)
 
 with col_chat:
     for idx_msg, msg in enumerate(st.session_state.messages):
@@ -569,13 +661,73 @@ with col_chat:
                 )
                 if turno.citacoes:
                     st.html(renderizar_citacoes_html(turno.citacoes))
+                if turno.detalhes_trechos:
+                    st.caption("Abrir trecho no PDF original (BBox):")
+                    with st.container(horizontal=True):
+                        for idx_t, det in enumerate(turno.detalhes_trechos, start=1):
+                            secao_curta = det.metadados.secao or det.metadados.titulo
+                            if len(secao_curta) > 28:
+                                secao_curta = f"{secao_curta[:25]}..."
+                            pag_str = f"Pág. {det.metadados.pagina}" if det.metadados.pagina else "Pág. 1"
+                            if st.button(
+                                f"#{idx_t} · {secao_curta} ({pag_str})",
+                                icon=":material/find_in_page:",
+                                key=f"chat_pdf_btn_{turno.id_turno}_{idx_msg}_{idx_t}",
+                            ):
+                                _abrir_modal_trecho_pdf(det, idx_t)
 
-with col_panel:
-    turno_selecionado: TelemetriaTurno | None = next(
-        (t for t in st.session_state.turnos if t.id_turno == st.session_state.selected_msg_id),
-        None,
-    )
-    if turno_selecionado is None:
-        _renderizar_visao_global(st.session_state.turnos)
-    else:
-        _renderizar_raio_x(turno_selecionado)
+    if prompt_ativo:
+        st.session_state.messages.append({"role": "user", "content": prompt_ativo})
+        with st.chat_message("user"):
+            st.write(prompt_ativo)
+
+        with st.chat_message("assistant"), st.status(
+            ":shimmer[Consultando bases e gerando resposta...]",
+            expanded=True,
+            state="running",
+        ) as status_box:
+            def _atualizar_loading(etapa: str) -> None:
+                status_box.update(label=f":shimmer[{etapa}]", state="running")
+                st.write(etapa)
+
+            turno_novo = executar_turno_rag(
+                pergunta=prompt_ativo,
+                modelo_selecionado=modelo_selecionado,
+                buscador=buscador,
+                servico_llm=servico_llm,
+                ao_avancar_etapa=_atualizar_loading,
+            )
+            status_box.update(label="Resposta gerada", state="complete", expanded=False)
+
+        st.session_state.turnos.append(turno_novo)
+        st.session_state.messages.append(
+            {"role": "assistant", "id": turno_novo.id_turno, "turno": turno_novo}
+        )
+        st.session_state.selected_msg_id = None
+        st.rerun()
+
+        with st.chat_message("assistant"):
+            with st.status(
+                ":shimmer[Consultando bases e gerando resposta...]",
+                expanded=True,
+                state="running",
+            ) as status_box:
+                def _atualizar_loading(etapa: str) -> None:
+                    status_box.update(label=f":shimmer[{etapa}]", state="running")
+                    st.write(etapa)
+
+                turno_novo = executar_turno_rag(
+                    pergunta=prompt_ativo,
+                    modelo_selecionado=modelo_selecionado,
+                    buscador=buscador,
+                    servico_llm=servico_llm,
+                    ao_avancar_etapa=_atualizar_loading,
+                )
+                status_box.update(label="Resposta gerada", state="complete", expanded=False)
+
+        st.session_state.turnos.append(turno_novo)
+        st.session_state.messages.append(
+            {"role": "assistant", "id": turno_novo.id_turno, "turno": turno_novo}
+        )
+        st.session_state.selected_msg_id = None
+        st.rerun()
