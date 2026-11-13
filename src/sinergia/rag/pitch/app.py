@@ -1,7 +1,6 @@
 """Aplicação Streamlit SinergIA - RAG Demo com roteamento autônomo e telemetria técnica."""
 
 import json
-import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -20,7 +19,6 @@ from sinergia.rag.interfaces import (
 from sinergia.rag.pitch.ollama_service import (
     MAPA_BASES_FERRAMENTAS,
     GroqPitchService,
-    OllamaPitchService,
 )
 from sinergia.rag.pitch.pdf_preview import (
     extrair_bboxes_trecho,
@@ -152,11 +150,6 @@ def obter_buscador_pitch() -> BuscadorHibrido:
     return buscador
 
 
-def obter_servico_ollama() -> OllamaPitchService:
-    """Retorna uma instância do serviço Ollama local."""
-    return OllamaPitchService(base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
-
-
 def obter_servico_groq() -> GroqPitchService:
     """Retorna uma instância do serviço Groq Cloud."""
     return GroqPitchService()
@@ -182,69 +175,118 @@ def _selecionar_turno(id_turno: int | None) -> None:
         st.session_state.selected_msg_id = id_turno
 
 
+def obter_historico_chat_sessao(
+    turnos: list[TelemetriaTurno] | None = None,
+    max_turnos: int = 6,
+) -> list[dict[str, str]]:
+    """Extrai o histórico recente de perguntas e respostas salvo na sessão atual."""
+    lista_turnos = turnos if turnos is not None else st.session_state.get("turnos", [])
+    historico: list[dict[str, str]] = []
+    for t in lista_turnos[-max_turnos:]:
+        if t.pergunta:
+            historico.append({"role": "user", "content": t.pergunta})
+        if t.resposta:
+            historico.append({"role": "assistant", "content": t.resposta})
+    return historico
+
+
 def executar_turno_rag(
     pergunta: str,
     modelo_selecionado: str | None,
     buscador: BuscadorHibrido,
-    servico_llm: OllamaPitchService | GroqPitchService,
+    servico_llm: GroqPitchService,
     ao_avancar_etapa: Callable[[str], None] | None = None,
     ao_receber_reasoning: Callable[[str], None] | None = None,
     ao_receber_conteudo: Callable[[str], None] | None = None,
+    historico: list[dict[str, str]] | None = None,
 ) -> TelemetriaTurno:
     """Executa roteamento autônomo ponderado, busca híbrida multi-base e geração na LLM ativa."""
+    historico_sessao = historico if historico is not None else obter_historico_chat_sessao()
+
     if ao_avancar_etapa:
         ao_avancar_etapa("Roteando pergunta autonomamente entre as bases F1..F5...")
-    decisao = servico_llm.decidir_base_autonomamente(pergunta, modelo=modelo_selecionado)
+    try:
+        decisao = servico_llm.decidir_base_autonomamente(
+            pergunta, modelo=modelo_selecionado, historico=historico_sessao
+        )
+    except TypeError:
+        decisao = servico_llm.decidir_base_autonomamente(pergunta, modelo=modelo_selecionado)
 
-    chamadas = decisao.chamadas
+    chamadas = decisao.chamadas if decisao.usar_rag else []
     trechos_mesclados: list[TrechoRecuperado] = []
     detalhes_mesclados: list[DetalheScoreTrecho] = []
     embed_ms_total = 0.0
     db_rrf_ms_total = 0.0
     estatisticas_primarias: EstatisticasEmbedding | None = None
 
-    for chamada in chamadas:
-        if ao_avancar_etapa:
-            if len(chamadas) == 1:
-                ao_avancar_etapa(
-                    f"Buscando trechos na base **{chamada.codigo_base}** ({chamada.nome_base})..."
-                )
-            else:
-                ao_avancar_etapa(
-                    f"Buscando {chamada.limite_trechos} trecho(s) na base **{chamada.codigo_base}** "
-                    f"({chamada.nome_base} · peso {chamada.peso * 100:.0f}%)..."
-                )
-        resultado_rag = buscador.buscar_com_telemetria(
-            query=chamada.query_busca,
-            id_base=chamada.id_base,
-            limite=chamada.limite_trechos,
+    if decisao.usar_rag and chamadas:
+        for chamada in chamadas:
+            if ao_avancar_etapa:
+                if len(chamadas) == 1:
+                    ao_avancar_etapa(
+                        f"Buscando trechos na base **{chamada.codigo_base}** ({chamada.nome_base})..."
+                    )
+                else:
+                    ao_avancar_etapa(
+                        f"Buscando {chamada.limite_trechos} trecho(s) na base **{chamada.codigo_base}** "
+                        f"({chamada.nome_base} · peso {chamada.peso * 100:.0f}%)..."
+                    )
+            resultado_rag = buscador.buscar_com_telemetria(
+                query=chamada.query_busca,
+                id_base=chamada.id_base,
+                limite=chamada.limite_trechos,
+            )
+            trechos_mesclados.extend(resultado_rag.contexto.trechos)
+            detalhes_mesclados.extend(resultado_rag.detalhes_trechos)
+            embed_ms_total += resultado_rag.embed_ms
+            db_rrf_ms_total += resultado_rag.db_rrf_ms
+            if estatisticas_primarias is None:
+                estatisticas_primarias = resultado_rag.estatisticas_embedding
+
+    modelo_label = modelo_selecionado or "LLM ativa"
+    if decisao.usar_rag:
+        contexto_final = ContextoRAG(
+            query=decisao.query_busca,
+            id_base=decisao.id_base,
+            trechos=trechos_mesclados,
+            total_encontrado=len(trechos_mesclados),
         )
-        trechos_mesclados.extend(resultado_rag.contexto.trechos)
-        detalhes_mesclados.extend(resultado_rag.detalhes_trechos)
-        embed_ms_total += resultado_rag.embed_ms
-        db_rrf_ms_total += resultado_rag.db_rrf_ms
-        if estatisticas_primarias is None:
-            estatisticas_primarias = resultado_rag.estatisticas_embedding
+        estatisticas_finais = estatisticas_primarias or EstatisticasEmbedding()
+        if ao_avancar_etapa:
+            ao_avancar_etapa(f"Gerando resposta fundamentada com `{modelo_label}`...")
+    else:
+        contexto_final = ContextoRAG(
+            query=None,
+            id_base=None,
+            trechos=[],
+            total_encontrado=0,
+        )
+        estatisticas_finais = EstatisticasEmbedding(dimensoes=0, norma_l2=0.0)
+        if ao_avancar_etapa:
+            ao_avancar_etapa(
+                f"Respondendo ao colaborador com `{modelo_label}` (sem consulta documental)..."
+            )
 
-    contexto_final = ContextoRAG(
-        query=decisao.query_busca,
-        id_base=decisao.id_base,
-        trechos=trechos_mesclados,
-        total_encontrado=len(trechos_mesclados),
-    )
-    estatisticas_finais = estatisticas_primarias or EstatisticasEmbedding()
+    try:
+        resposta_llm = servico_llm.gerar_resposta_fundamentada(
+            pergunta=pergunta,
+            contexto=contexto_final,
+            modelo=modelo_selecionado,
+            ao_receber_reasoning=ao_receber_reasoning,
+            ao_receber_conteudo=ao_receber_conteudo,
+            usar_rag=decisao.usar_rag,
+            historico=historico_sessao,
+        )
+    except TypeError:
+        resposta_llm = servico_llm.gerar_resposta_fundamentada(
+            pergunta=pergunta,
+            contexto=contexto_final,
+            modelo=modelo_selecionado,
+            ao_receber_reasoning=ao_receber_reasoning,
+            ao_receber_conteudo=ao_receber_conteudo,
+        )
 
-    if ao_avancar_etapa:
-        modelo_label = modelo_selecionado or "LLM ativa"
-        ao_avancar_etapa(f"Gerando resposta fundamentada com `{modelo_label}`...")
-    resposta_llm = servico_llm.gerar_resposta_fundamentada(
-        pergunta=pergunta,
-        contexto=contexto_final,
-        modelo=modelo_selecionado,
-        ao_receber_reasoning=ao_receber_reasoning,
-        ao_receber_conteudo=ao_receber_conteudo,
-    )
-
+    citacoes_finais = resposta_llm.citacoes if decisao.usar_rag else []
     total_ms = decisao.roteamento_ms + embed_ms_total + db_rrf_ms_total + resposta_llm.llm_ms
     id_turno = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
@@ -254,7 +296,7 @@ def executar_turno_rag(
         pergunta=pergunta,
         resposta=resposta_llm.resposta,
         reasoning=resposta_llm.reasoning,
-        citacoes=resposta_llm.citacoes,
+        citacoes=citacoes_finais,
         roteamento=decisao,
         tempos=TemposTurno(
             total_ms=round(total_ms, 2),
@@ -546,7 +588,12 @@ def _renderizar_raio_x(turno: TelemetriaTurno) -> None:
         ol = turno.metricas_ollama
         with st.container(border=True):
             st.markdown("**Tool(s) escolhida(s) & métricas de geração**")
-            if len(turno.roteamento.chamadas) > 1:
+            if not turno.roteamento.usar_rag or not turno.roteamento.chamadas:
+                codigo_tools = (
+                    "# Guardrail conversacional: nenhuma tool de busca vetorial executada\n"
+                    f"# modo={turno.roteamento.modo_roteamento} | modelo={ol.modelo}"
+                )
+            elif len(turno.roteamento.chamadas) > 1:
                 linhas_tools = [
                     f"{c.tool_name}(query={c.query_busca!r}, peso={c.peso:.2f}) -> {c.limite_trechos} trechos [{c.codigo_base}]"
                     for c in turno.roteamento.chamadas
@@ -585,10 +632,8 @@ inicializar_estado_sessao()
 
 buscador = obter_buscador_pitch()
 
-# Cabeçalho limpo: título, toggle Local/Cloud (Groq) e seletor de modelo
-hdr_title, hdr_provider, hdr_model = st.columns(
-    [5.5, 1.5, 3.0], vertical_alignment="center"
-)
+# Cabeçalho limpo: título e seletor de modelo Cloud (Groq)
+hdr_title, hdr_model = st.columns([7.0, 3.0], vertical_alignment="center")
 with hdr_title:
     st.html(
         '<h1 class="sinergia-header-title">SinergIA - RAG Demo</h1>'
@@ -596,31 +641,21 @@ with hdr_title:
         "A LLM decide autonomamente qual base consultar. Selecione qualquer resposta para abrir o Raio-X técnico."
         "</p>"
     )
-with hdr_provider:
-    usar_cloud_groq = st.toggle(
-        "Cloud (Groq)",
-        value=True,
-        key="provider_cloud_toggle",
-        help="Alternar entre inferência Cloud (Groq) e Local (Ollama)",
-    )
 
-if usar_cloud_groq:
-    servico_llm: OllamaPitchService | GroqPitchService = obter_servico_groq()
-    instalados_local: list[str] = []
-    ativos_cloud: list[str] = servico_llm.listar_modelos_disponiveis()
-    modelos_disponiveis = servico_llm.listar_modelos_com_presets()
-else:
-    servico_llm = obter_servico_ollama()
-    instalados_local = servico_llm.listar_modelos_disponiveis()
-    ativos_cloud = []
-    modelos_disponiveis = servico_llm.listar_modelos_com_presets()
+servico_llm = obter_servico_groq()
+ativos_cloud: list[str] = servico_llm.listar_modelos_disponiveis()
+modelos_disponiveis = servico_llm.listar_modelos_com_presets()
 
+modelo_preset_padrao = (
+    "openai/gpt-oss-20b"
+    if "openai/gpt-oss-20b" in modelos_disponiveis
+    else (modelos_disponiveis[0] if modelos_disponiveis else None)
+)
 if (
-    "ollama_model_select" in st.session_state
-    and st.session_state["ollama_model_select"] not in modelos_disponiveis
-    and modelos_disponiveis
-):
-    st.session_state["ollama_model_select"] = modelos_disponiveis[0]
+    "ollama_model_select" not in st.session_state
+    or st.session_state["ollama_model_select"] not in modelos_disponiveis
+) and modelo_preset_padrao is not None:
+    st.session_state["ollama_model_select"] = modelo_preset_padrao
 
 with hdr_model:
     modelo_selecionado = st.selectbox(
@@ -629,21 +664,7 @@ with hdr_model:
         key="ollama_model_select",
         label_visibility="collapsed",
     )
-    if (
-        not usar_cloud_groq
-        and instalados_local
-        and modelo_selecionado
-        and modelo_selecionado not in instalados_local
-    ):
-        st.caption(
-            f":material/download: Preset ainda não baixado. Rode: `ollama pull {modelo_selecionado}`"
-        )
-    elif (
-        usar_cloud_groq
-        and ativos_cloud
-        and modelo_selecionado
-        and modelo_selecionado not in ativos_cloud
-    ):
+    if ativos_cloud and modelo_selecionado and modelo_selecionado not in ativos_cloud:
         st.caption(
             f":material/info: Modelo `{modelo_selecionado}` não consta ativo nesta chave Groq (verifique permissões no Groq Console)."
         )

@@ -251,6 +251,14 @@ def renderizar_badge_base(
 
 def renderizar_badges_roteamento(roteamento: object, ativo: bool = False) -> str:
     """Renderiza um ou múltiplos badges com peso proporcional para as bases acionadas."""
+    if not getattr(roteamento, "usar_rag", True) or getattr(roteamento, "id_base", None) is None:
+        classe = (
+            "sinergia-badge-base sinergia-badge-base--ativa"
+            if ativo
+            else "sinergia-badge-base"
+        )
+        return f'<span class="{classe}">Chat Direto · Sem consulta documental</span>'
+
     chamadas = getattr(roteamento, "chamadas", None) or []
     if len(chamadas) <= 1:
         return renderizar_badge_base(

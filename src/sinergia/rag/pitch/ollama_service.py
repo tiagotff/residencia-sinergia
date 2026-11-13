@@ -6,6 +6,7 @@ import math
 import os
 import re
 import time
+import unicodedata
 from collections.abc import Callable
 from typing import Any
 
@@ -28,8 +29,8 @@ PRESETS_MODELOS_LOCAL: list[str] = [
 ]
 
 PRESETS_MODELOS_GROQ: list[str] = [
-    "qwen/qwen3.8-27b",
     "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b",
     "openai/gpt-oss-120b",
     "openai/gpt-oss-safeguard-20b",
     "allam-2-7b",
@@ -95,6 +96,157 @@ TOOL_NAME_TO_BASE_ID: dict[str, int] = {
     info["tool_name"]: id_base for id_base, info in MAPA_BASES_FERRAMENTAS.items()
 }
 
+_FRASES_CONVERSACIONAIS_EXATAS: set[str] = {
+    "oi",
+    "ola",
+    "bom dia",
+    "boa tarde",
+    "boa noite",
+    "e ai",
+    "opa",
+    "ola tudo bem",
+    "oi tudo bem",
+    "bom dia tudo bem",
+    "boa tarde tudo bem",
+    "boa noite tudo bem",
+    "tudo bem",
+    "tudo bom",
+    "como vai",
+    "como voce esta",
+    "obrigado",
+    "obrigada",
+    "muito obrigado",
+    "muito obrigada",
+    "obrigado pela ajuda",
+    "obrigada pela ajuda",
+    "valeu",
+    "agradecido",
+    "ok",
+    "ok obrigado",
+    "beleza",
+    "entendi",
+    "perfeito",
+    "tchau",
+    "ate logo",
+    "ate mais",
+    "quem e voce",
+    "qual seu nome",
+    "qual o seu nome",
+    "o que voce faz",
+    "como voce funciona",
+    "como pode me ajudar",
+    "como voce pode me ajudar",
+    "me ajude",
+    "ajuda",
+    "preciso de ajuda",
+}
+
+_PREFIXOS_SAUDACAO: tuple[str, ...] = (
+    "bom dia",
+    "boa tarde",
+    "boa noite",
+    "ola tudo bem",
+    "oi tudo bem",
+    "tudo bem",
+    "tudo bom",
+    "ola",
+    "oi",
+    "opa",
+    "e ai",
+)
+
+_MARCADORES_INTENCAO_PERGUNTA: set[str] = {
+    "qual",
+    "quais",
+    "como",
+    "quando",
+    "quanto",
+    "quantos",
+    "quantas",
+    "onde",
+    "quem",
+    "porque",
+    "pode",
+    "posso",
+    "podemos",
+    "tenho",
+    "tem",
+    "preciso",
+    "precisa",
+    "devo",
+    "deve",
+    "funciona",
+    "funcionam",
+    "regra",
+    "regras",
+    "direito",
+    "direitos",
+    "pausa",
+    "pausas",
+    "limite",
+    "limites",
+    "validade",
+    "troca",
+    "substituicao",
+    "dias",
+    "tempo",
+    "fazer",
+    "explica",
+    "explique",
+    "sobre",
+    "fale",
+    "quero",
+    "saber",
+    "duvida",
+    "consultar",
+    "ver",
+    "mostrar",
+    "mostre",
+    "listar",
+    "liste",
+    "resumo",
+}
+
+
+def _normalizar_texto_guardrail(texto: str) -> str:
+    """Remove acentos, pontuações e espaços extras para comparação determinística."""
+    sem_acentos = "".join(
+        c for c in unicodedata.normalize("NFKD", texto or "") if not unicodedata.combining(c)
+    )
+    limpo = re.sub(r"[^a-zA-Z0-9\s]", " ", sem_acentos.lower())
+    return re.sub(r"\s+", " ", limpo).strip()
+
+
+def verificar_guardrail_conversacional(pergunta: str) -> bool:
+    """Detecta saudações, agradecimentos e termos soltos sem intenção de busca RAG."""
+    norm = _normalizar_texto_guardrail(pergunta)
+    if not norm or norm in _FRASES_CONVERSACIONAIS_EXATAS:
+        return True
+
+    restante = norm
+    mudou = True
+    while mudou and restante:
+        mudou = False
+        for pref in _PREFIXOS_SAUDACAO:
+            if restante == pref:
+                restante = ""
+                mudou = True
+                break
+            if restante.startswith(pref + " "):
+                restante = restante[len(pref) :].strip()
+                mudou = True
+                break
+
+    if not restante or restante in _FRASES_CONVERSACIONAIS_EXATAS:
+        return True
+
+    tokens_restante = restante.split()
+    return (
+        len(tokens_restante) == 1
+        and "?" not in (pergunta or "")
+        and tokens_restante[0] not in _MARCADORES_INTENCAO_PERGUNTA
+    )
+
 
 class ChamadaFerramentaRAG(BaseModel):
     """Representa uma chamada individual de ferramenta RAG ponderada para uma base (F1..F5)."""
@@ -153,22 +305,35 @@ def calcular_alocacao_trechos(
 class DecisaoRoteamento(BaseModel):
     """Resultado do roteamento autônomo da LLM para escolha da(s) base(s) RAG."""
 
-    id_base: int = Field(..., ge=1, le=5, description="ID da base principal escolhida (1 a 5)")
-    codigo_base: str = Field(..., description="Código da base principal (F1 a F5)")
+    id_base: int | None = Field(
+        default=None, ge=1, le=5, description="ID da base principal escolhida (1 a 5) ou None sem RAG"
+    )
+    codigo_base: str = Field(..., description="Código da base principal (F1 a F5 ou CHAT)")
     nome_base: str = Field(..., description="Nome do domínio da base principal")
     tool_name: str = Field(..., description="Nome da ferramenta principal selecionada")
     query_busca: str = Field(..., description="Query refinada para busca no RAG")
     modo_roteamento: str = Field(
-        ..., description="Estratégia usada: tool_calling, json_fallback ou heuristic_fallback"
+        ...,
+        description=(
+            "Estratégia usada: tool_calling, json_fallback, heuristic_fallback "
+            "ou guardrail_conversacional"
+        ),
     )
     roteamento_ms: float = Field(default=0.0, description="Tempo gasto no roteamento em ms")
     chamadas: list[ChamadaFerramentaRAG] = Field(
         default_factory=list,
         description="Lista ordenada por peso das ferramentas acionadas no turno",
     )
+    usar_rag: bool = Field(
+        default=True,
+        description="Indica se houve acionamento de busca documental RAG",
+    )
 
     @model_validator(mode="after")
     def _garantir_chamadas_preenchidas(self) -> "DecisaoRoteamento":
+        if not self.usar_rag or self.id_base is None:
+            self.chamadas = []
+            return self
         if not self.chamadas:
             self.chamadas = [
                 ChamadaFerramentaRAG(
@@ -185,7 +350,9 @@ class DecisaoRoteamento(BaseModel):
 
     @property
     def codigos_combinados(self) -> str:
-        """Retorna os códigos das bases acionadas unidos por '+' (ex: 'F4+F5')."""
+        """Retorna os códigos das bases acionadas unidos por '+' (ex: 'F4+F5') ou 'CHAT' sem RAG."""
+        if not self.usar_rag:
+            return self.codigo_base or "CHAT"
         if self.chamadas:
             return "+".join(c.codigo_base for c in self.chamadas)
         return self.codigo_base
@@ -512,7 +679,67 @@ class _BasePitchLLMService:
     ) -> DecisaoRoteamento:
         return self._construir_decisao_multipla([(id_base, query_busca, 1.0)], modo, inicio)
 
-    def _decidir_heuristica(self, pergunta: str, inicio: float) -> DecisaoRoteamento:
+    def _construir_decisao_sem_rag(self, modo: str, inicio: float) -> DecisaoRoteamento:
+        return DecisaoRoteamento(
+            id_base=None,
+            codigo_base="CHAT",
+            nome_base="Chat Direto (Sem RAG)",
+            tool_name="nenhuma",
+            query_busca="",
+            modo_roteamento=modo,
+            roteamento_ms=round((time.perf_counter() - inicio) * 1000.0, 2),
+            chamadas=[],
+            usar_rag=False,
+        )
+
+    @staticmethod
+    def _normalizar_mensagens_historico(
+        historico: list[dict[str, str]] | None,
+        max_mensagens: int = 4,
+        max_chars_por_mensagem: int = 400,
+    ) -> list[dict[str, str]]:
+        """Filtra, limita e compacta o histórico recente da sessão para economizar tokens."""
+        if not historico:
+            return []
+        mensagens_validas: list[dict[str, str]] = []
+        for item in historico:
+            if not isinstance(item, dict):
+                continue
+            role = item.get("role")
+            content = (item.get("content") or "").strip()
+            if role in ("user", "assistant") and content:
+                if len(content) > max_chars_por_mensagem:
+                    content = content[:max_chars_por_mensagem].rstrip() + "..."
+                mensagens_validas.append({"role": role, "content": content})
+        return mensagens_validas[-max_mensagens:]
+
+    @classmethod
+    def _formatar_historico_para_prompt(
+        cls,
+        historico: list[dict[str, str]] | None,
+        max_mensagens: int = 4,
+        max_chars_por_mensagem: int = 400,
+    ) -> str:
+        """Formata o histórico recente da sessão em texto legível para exibição no Raio-X."""
+        normalizado = cls._normalizar_mensagens_historico(
+            historico,
+            max_mensagens=max_mensagens,
+            max_chars_por_mensagem=max_chars_por_mensagem,
+        )
+        if not normalizado:
+            return ""
+        linhas = []
+        for msg in normalizado:
+            autor = "Colaborador" if msg["role"] == "user" else "SinergIA"
+            linhas.append(f"{autor}: {msg['content']}")
+        return "\n".join(linhas)
+
+    def _decidir_heuristica(
+        self,
+        pergunta: str,
+        inicio: float,
+        historico: list[dict[str, str]] | None = None,
+    ) -> DecisaoRoteamento:
         """Fallback determinístico por palavras-chave com peso proporcional ao número de matches."""
         texto = pergunta.lower()
         regras = [
@@ -529,6 +756,23 @@ class _BasePitchLLMService:
                 encontradas.append((id_base, pergunta, float(matches)))
         if encontradas:
             return self._construir_decisao_multipla(encontradas, "heuristic_fallback", inicio)
+
+        # Se for pergunta de continuação sem palavra-chave explícita, consulta o histórico do colaborador na sessão
+        for msg in reversed(self._normalizar_mensagens_historico(historico)):
+            if msg["role"] != "user":
+                continue
+            texto_ant = msg["content"].lower()
+            query_combinada = f"{msg['content']} {pergunta}".strip()
+            encontradas_hist: list[tuple[int, str, float]] = []
+            for id_base, termos in regras:
+                matches = sum(1 for termo in termos if termo in texto_ant)
+                if matches > 0:
+                    encontradas_hist.append((id_base, query_combinada, float(matches)))
+            if encontradas_hist:
+                return self._construir_decisao_multipla(
+                    encontradas_hist, "heuristic_fallback", inicio
+                )
+
         return self._construir_decisao(1, pergunta, "heuristic_fallback", inicio)
 
     def _parsear_tool_calls(
@@ -609,6 +853,8 @@ class _BasePitchLLMService:
         consultas = parsed.get("consultas")
         itens: list[tuple[int, str, float]] = []
         if isinstance(consultas, list):
+            if len(consultas) == 0:
+                return self._construir_decisao_sem_rag("json_sem_rag", inicio)
             for c in consultas:
                 if not isinstance(c, dict):
                     continue
@@ -641,23 +887,38 @@ class _BasePitchLLMService:
             return None
         return self._construir_decisao_multipla(itens, "json_fallback", inicio)
 
-    def _mensagens_roteamento_tool(self, pergunta: str) -> list[dict[str, str]]:
-        return [
+    def _mensagens_roteamento_tool(
+        self,
+        pergunta: str,
+        historico: list[dict[str, str]] | None = None,
+    ) -> list[dict[str, str]]:
+        mensagens: list[dict[str, str]] = [
             {
                 "role": "system",
                 "content": (
-                    "Você é o roteador autônomo do SinergIA. Analise a pergunta do colaborador:\n"
-                    "- Se tratar de APENAS UM tema, chame a ferramenta específica (F1..F5) correspondente.\n"
+                    "Você é o roteador autônomo do SinergIA. Analise a mensagem atual do colaborador "
+                    "(e o histórico da sessão, caso haja perguntas de continuação):\n"
+                    "- Se a mensagem for apenas saudação, agradecimento, despedida, conversa social ou "
+                    "uma palavra solta sem dúvida/pedido concreto (ex: 'Bom dia, ergonomia'), NÃO chame nenhuma ferramenta.\n"
+                    "- Se tratar de APENAS UM tema normativo/consulta concreta, chame a ferramenta específica (F1..F5) correspondente.\n"
                     "- Se abordar DOIS OU MAIS temas/bases diferentes (ex: saúde ocupacional e EPIs, "
                     "pausas e CLT), chame `ferramenta_busca_multiplas_bases` (ou as ferramentas em paralelo) "
                     "incluindo APENAS as bases relacionadas, com uma query específica e um peso (0.1 a 1.0) "
                     "proporcional ao foco de cada tema na pergunta."
                 ),
             },
+            *self._normalizar_mensagens_historico(
+                historico, max_mensagens=2, max_chars_por_mensagem=220
+            ),
             {"role": "user", "content": pergunta},
         ]
+        return mensagens
 
-    def _mensagens_roteamento_json(self, pergunta: str) -> list[dict[str, str]]:
+    def _mensagens_roteamento_json(
+        self,
+        pergunta: str,
+        historico: list[dict[str, str]] | None = None,
+    ) -> list[dict[str, str]]:
         bases_desc = "\n".join(
             f"- id_base {b['id_base']} ({b['codigo']}): {b['nome']} -> {b['descricao']}"
             for b in MAPA_BASES_FERRAMENTAS.values()
@@ -666,66 +927,137 @@ class _BasePitchLLMService:
             {
                 "role": "system",
                 "content": (
-                    "Escolha qual ou quais bases de conhecimento (1 a 5) respondem melhor à pergunta. "
-                    "Inclua APENAS as bases diretamente relacionadas à pergunta.\n"
+                    "Escolha qual ou quais bases de conhecimento (1 a 5) respondem melhor à pergunta do colaborador "
+                    "(considerando o histórico da sessão em caso de continuação). "
+                    "Inclua APENAS as bases diretamente relacionadas à dúvida.\n"
+                    "Se a mensagem for apenas saudação, agradecimento ou tema vago sem pergunta definida, "
+                    "retorne `{\"consultas\": []}`.\n"
                     "Responda APENAS JSON válido no formato "
                     "{\"consultas\": [{\"id_base\": <int 1..5>, \"query\": \"<string>\", \"peso\": <float 0.1..1.0>}]}.\n"
                     "Atribua um peso maior à base que representa o foco principal da pergunta.\n"
                     f"Bases disponíveis:\n{bases_desc}"
                 ),
             },
+            *self._normalizar_mensagens_historico(
+                historico, max_mensagens=2, max_chars_por_mensagem=220
+            ),
             {"role": "user", "content": pergunta},
         ]
 
     def _montar_prompts_geracao(
-        self, pergunta: str, contexto: ContextoRAG
+        self,
+        pergunta: str,
+        contexto: ContextoRAG,
+        usar_rag: bool = True,
+        historico: list[dict[str, str]] | None = None,
     ) -> tuple[str, str, str]:
-        contexto_formatado = contexto.formatar_para_prompt()
-        system_prompt = (
-            "Você é o assistente SinergIA de bem-estar, ergonomia, direitos e segurança do trabalho. "
-            "Responda em português de forma clara, objetiva e estritamente fundamentada nas fontes recuperadas. "
-            "Cite explicitamente o título do documento, versão, seção/artigo e página presentes nas fontes. "
-            "Se as fontes não trouxerem a resposta exata, informe essa limitação sem inventar dados."
+        historico_txt = self._formatar_historico_para_prompt(historico)
+        bloco_historico_raiox = (
+            f"[HISTÓRICO DA SESSÃO]\n{historico_txt}\n\n" if historico_txt else ""
         )
-        user_prompt = (
-            f"Pergunta do colaborador: {pergunta}\n\n"
-            f"Fontes recuperadas no RAG:\n{contexto_formatado}"
+
+        if not usar_rag:
+            system_prompt = (
+                "Você é o SinergIA, o assistente corporativo interno de apoio ao colaborador (trabalhador da empresa) "
+                "para dúvidas sobre ergonomia e pausas (NR-17), direitos e benefícios trabalhistas (CLT), "
+                "procedimentos e treinamentos (POPs), saúde ocupacional (PCMSO/NR-7) e EPIs (NR-6).\n"
+                "Diretrizes para esta interação conversacional (sem consulta documental neste turno):\n"
+                "1. Responda ao colaborador em português de forma cordial, acolhedora, breve e prestativa.\n"
+                "2. Se for uma saudação inicial (ex: 'Olá', 'Bom dia') e não houver histórico na sessão, "
+                "cumprimente o colaborador e apresente de forma sucinta em quais temas do dia a dia da empresa você pode ajudá-lo.\n"
+                "3. Se o colaborador enviou apenas um tema solto sem pergunta clara (ex: 'Bom dia, ergonomia'), "
+                "cumprimente-o e peça gentilmente para ele especificar qual é a dúvida sobre esse assunto.\n"
+                "4. Se já houver histórico de conversa nesta sessão (ex: agradecimentos como 'Obrigado' ou comentários), "
+                "responda mantendo o contexto do que vocês já conversaram na sessão atual.\n"
+                "5. REGRA ESTRITA: como nenhuma busca em documentos foi realizada neste turno, NÃO cite nomes de arquivos PDF, "
+                "versões, artigos ou números de página."
+            )
+            user_prompt = f"Mensagem do colaborador: {pergunta}"
+        else:
+            contexto_formatado = contexto.formatar_para_prompt()
+            system_prompt = (
+                "Você é o SinergIA, o assistente corporativo interno de apoio ao colaborador (trabalhador da empresa) "
+                "para temas de bem-estar, ergonomia e pausas (NR-17), direitos e benefícios trabalhistas (CLT), "
+                "procedimentos operacionais e treinamentos (POPs), saúde ocupacional (PCMSO/NR-7) e EPIs (NR-6).\n"
+                "Diretrizes para responder ao colaborador:\n"
+                "1. Trate o usuário diretamente como um colaborador da empresa ('você'), com tom acolhedor, respeitoso, "
+                "empático e linguagem acessível.\n"
+                "2. Comece com uma resposta direta e prática para a dúvida do trabalhador, traduzindo as regras técnicas "
+                "ou legais para orientações claras do dia a dia de trabalho.\n"
+                "3. Fundamentação estrita: baseie-se exclusivamente nas fontes recuperadas no RAG e cite explicitamente "
+                "o título do documento, versão, seção/artigo/item e página.\n"
+                "4. Se houver histórico da sessão, mantenha a continuidade com o que já foi conversado na sessão atual.\n"
+                "5. Se as fontes não trouxerem a resposta exata, informe essa limitação com transparência, sem inventar "
+                "dados, e oriente o colaborador a confirmar com o RH, SESMT ou sua liderança."
+            )
+            user_prompt = (
+                f"Pergunta do colaborador: {pergunta}\n\n"
+                f"Fontes recuperadas no RAG:\n{contexto_formatado}"
+            )
+
+        prompt_completo = (
+            f"[SYSTEM]\n{system_prompt}\n\n"
+            f"{bloco_historico_raiox}"
+            f"[USER]\n{user_prompt}"
         )
-        prompt_completo = f"[SYSTEM]\n{system_prompt}\n\n[USER]\n{user_prompt}"
         return system_prompt, user_prompt, prompt_completo
 
     def _rotear_via_tool_calling(
-        self, pergunta: str, modelo: str, inicio: float
+        self,
+        pergunta: str,
+        modelo: str,
+        inicio: float,
+        historico: list[dict[str, str]] | None = None,
     ) -> DecisaoRoteamento | None:
         raise NotImplementedError
 
     def _rotear_via_json_estruturado(
-        self, pergunta: str, modelo: str, inicio: float
+        self,
+        pergunta: str,
+        modelo: str,
+        inicio: float,
+        historico: list[dict[str, str]] | None = None,
     ) -> DecisaoRoteamento | None:
         raise NotImplementedError
 
     def decidir_base_autonomamente(
-        self, pergunta: str, modelo: str | None = None
+        self,
+        pergunta: str,
+        modelo: str | None = None,
+        historico: list[dict[str, str]] | None = None,
     ) -> DecisaoRoteamento:
-        """Decide autonomamente qual das 5 bases (F1..F5) consultar para a pergunta."""
+        """Decide autonomamente qual das 5 bases (F1..F5) consultar ou se dispensa busca RAG."""
         inicio = time.perf_counter()
+        if verificar_guardrail_conversacional(pergunta):
+            return self._construir_decisao_sem_rag("guardrail_conversacional", inicio)
+
         modelo_ativo = self.selecionar_modelo_ativo(modelo)
 
         try:
-            decisao = self._rotear_via_tool_calling(pergunta, modelo_ativo, inicio)
+            try:
+                decisao = self._rotear_via_tool_calling(
+                    pergunta, modelo_ativo, inicio, historico=historico
+                )
+            except TypeError:
+                decisao = self._rotear_via_tool_calling(pergunta, modelo_ativo, inicio)
             if decisao is not None:
                 return decisao
-        except (httpx.HTTPError, ValueError, KeyError, TypeError) as erro:
+        except (httpx.HTTPError, httpx.StreamError, ValueError, KeyError, TypeError) as erro:
             logger.debug("Tool calling indisponível no modelo %s: %s", modelo_ativo, erro)
 
         try:
-            decisao = self._rotear_via_json_estruturado(pergunta, modelo_ativo, inicio)
+            try:
+                decisao = self._rotear_via_json_estruturado(
+                    pergunta, modelo_ativo, inicio, historico=historico
+                )
+            except TypeError:
+                decisao = self._rotear_via_json_estruturado(pergunta, modelo_ativo, inicio)
             if decisao is not None:
                 return decisao
-        except (httpx.HTTPError, ValueError, KeyError, TypeError) as erro:
+        except (httpx.HTTPError, httpx.StreamError, ValueError, KeyError, TypeError) as erro:
             logger.debug("Fallback JSON indisponível no modelo %s: %s", modelo_ativo, erro)
 
-        return self._decidir_heuristica(pergunta, inicio)
+        return self._decidir_heuristica(pergunta, inicio, historico=historico)
 
 
 class OllamaPitchService(_BasePitchLLMService):
@@ -779,14 +1111,18 @@ class OllamaPitchService(_BasePitchLLMService):
         return modelo in self.listar_modelos_disponiveis()
 
     def _rotear_via_tool_calling(
-        self, pergunta: str, modelo: str, inicio: float
+        self,
+        pergunta: str,
+        modelo: str,
+        inicio: float,
+        historico: list[dict[str, str]] | None = None,
     ) -> DecisaoRoteamento | None:
         payload = {
             "model": modelo,
             "stream": False,
             "think": False,
             "options": {"temperature": 0.0},
-            "messages": self._mensagens_roteamento_tool(pergunta),
+            "messages": self._mensagens_roteamento_tool(pergunta, historico=historico),
             "tools": _construir_definicoes_tools(),
         }
         resp = httpx.post(f"{self.base_url}/api/chat", json=payload, timeout=self.timeout_s)
@@ -795,7 +1131,11 @@ class OllamaPitchService(_BasePitchLLMService):
         return self._parsear_tool_calls(tool_calls, pergunta, inicio)
 
     def _rotear_via_json_estruturado(
-        self, pergunta: str, modelo: str, inicio: float
+        self,
+        pergunta: str,
+        modelo: str,
+        inicio: float,
+        historico: list[dict[str, str]] | None = None,
     ) -> DecisaoRoteamento | None:
         payload = {
             "model": modelo,
@@ -803,7 +1143,7 @@ class OllamaPitchService(_BasePitchLLMService):
             "think": False,
             "format": "json",
             "options": {"temperature": 0.0},
-            "messages": self._mensagens_roteamento_json(pergunta),
+            "messages": self._mensagens_roteamento_json(pergunta, historico=historico),
         }
         resp = httpx.post(f"{self.base_url}/api/chat", json=payload, timeout=self.timeout_s)
         resp.raise_for_status()
@@ -817,11 +1157,20 @@ class OllamaPitchService(_BasePitchLLMService):
         modelo: str | None = None,
         ao_receber_reasoning: Callable[[str], None] | None = None,
         ao_receber_conteudo: Callable[[str], None] | None = None,
+        usar_rag: bool = True,
+        historico: list[dict[str, str]] | None = None,
     ) -> RespostaGeradaOllama:
         """Gera resposta em português fundamentada nos trechos recuperados com streaming e raciocínio."""
         modelo_ativo = self.selecionar_modelo_ativo(modelo)
-        citacoes = extrair_citacoes_contexto(contexto)
-        system_prompt, user_prompt, prompt_completo = self._montar_prompts_geracao(pergunta, contexto)
+        citacoes = extrair_citacoes_contexto(contexto) if usar_rag else []
+        system_prompt, user_prompt, prompt_completo = self._montar_prompts_geracao(
+            pergunta, contexto, usar_rag=usar_rag, historico=historico
+        )
+        mensagens_chat = [
+            {"role": "system", "content": system_prompt},
+            *self._normalizar_mensagens_historico(historico),
+            {"role": "user", "content": user_prompt},
+        ]
 
         inicio = time.perf_counter()
         parser = _ThinkStreamParser()
@@ -831,10 +1180,7 @@ class OllamaPitchService(_BasePitchLLMService):
                 "model": modelo_ativo,
                 "stream": True,
                 "options": {"temperature": 0.1},
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                "messages": mensagens_chat,
             }
             with httpx.stream(
                 "POST",
@@ -842,6 +1188,11 @@ class OllamaPitchService(_BasePitchLLMService):
                 json=payload,
                 timeout=self.timeout_s,
             ) as resp:
+                if getattr(resp, "status_code", 200) >= 400:
+                    try:
+                        resp.read()
+                    except (httpx.HTTPError, httpx.StreamError):
+                        pass
                 resp.raise_for_status()
                 for linha in resp.iter_lines():
                     if not linha:
@@ -895,7 +1246,7 @@ class OllamaPitchService(_BasePitchLLMService):
                 llm_ms=round(llm_ms, 2),
                 prompt_enviado=prompt_completo,
             )
-        except (httpx.HTTPError, ValueError, KeyError, TypeError) as erro:
+        except (httpx.HTTPError, httpx.StreamError, ValueError, KeyError, TypeError) as erro:
             llm_ms = (time.perf_counter() - inicio) * 1000.0
             resumo_trechos = (
                 f"Base consultada retornou {len(contexto.trechos)} trecho(s) relevante(s): "
@@ -920,7 +1271,7 @@ class OllamaPitchService(_BasePitchLLMService):
 class GroqPitchService(_BasePitchLLMService):
     """Cliente Cloud (Groq) compatível com OpenAI API para roteamento autônomo e geração RAG."""
 
-    modelo_fallback_padrao = "qwen/qwen3.8-27b"
+    modelo_fallback_padrao = "openai/gpt-oss-20b"
 
     def __init__(
         self,
@@ -963,8 +1314,8 @@ class GroqPitchService(_BasePitchLLMService):
 
         # Priorizar modelos de raciocínio/principais antes dos auxiliares
         prioridade = {
-            "qwen/qwen3.8-27b": 0,
-            "openai/gpt-oss-20b": 1,
+            "openai/gpt-oss-20b": 0,
+            "qwen/qwen3.8-27b": 1,
             "openai/gpt-oss-120b": 2,
             "openai/gpt-oss-safeguard-20b": 3,
             "allam-2-7b": 4,
@@ -982,14 +1333,18 @@ class GroqPitchService(_BasePitchLLMService):
         return not disponiveis or modelo in disponiveis
 
     def _rotear_via_tool_calling(
-        self, pergunta: str, modelo: str, inicio: float
+        self,
+        pergunta: str,
+        modelo: str,
+        inicio: float,
+        historico: list[dict[str, str]] | None = None,
     ) -> DecisaoRoteamento | None:
         if not self.api_key:
             return None
         payload = {
             "model": modelo,
             "temperature": 0.0,
-            "messages": self._mensagens_roteamento_tool(pergunta),
+            "messages": self._mensagens_roteamento_tool(pergunta, historico=historico),
             "tools": _construir_definicoes_tools(),
             "tool_choice": "auto",
             "parallel_tool_calls": True,
@@ -1006,7 +1361,11 @@ class GroqPitchService(_BasePitchLLMService):
         return self._parsear_tool_calls(tool_calls, pergunta, inicio)
 
     def _rotear_via_json_estruturado(
-        self, pergunta: str, modelo: str, inicio: float
+        self,
+        pergunta: str,
+        modelo: str,
+        inicio: float,
+        historico: list[dict[str, str]] | None = None,
     ) -> DecisaoRoteamento | None:
         if not self.api_key:
             return None
@@ -1014,7 +1373,7 @@ class GroqPitchService(_BasePitchLLMService):
             "model": modelo,
             "temperature": 0.0,
             "response_format": {"type": "json_object"},
-            "messages": self._mensagens_roteamento_json(pergunta),
+            "messages": self._mensagens_roteamento_json(pergunta, historico=historico),
         }
         resp = httpx.post(
             f"{self.base_url}/chat/completions",
@@ -1033,11 +1392,20 @@ class GroqPitchService(_BasePitchLLMService):
         modelo: str | None = None,
         ao_receber_reasoning: Callable[[str], None] | None = None,
         ao_receber_conteudo: Callable[[str], None] | None = None,
+        usar_rag: bool = True,
+        historico: list[dict[str, str]] | None = None,
     ) -> RespostaGeradaOllama:
         """Gera resposta fundamentada via Groq Cloud com streaming, raciocínio e métricas de usage."""
         modelo_ativo = self.selecionar_modelo_ativo(modelo)
-        citacoes = extrair_citacoes_contexto(contexto)
-        system_prompt, user_prompt, prompt_completo = self._montar_prompts_geracao(pergunta, contexto)
+        citacoes = extrair_citacoes_contexto(contexto) if usar_rag else []
+        system_prompt, user_prompt, prompt_completo = self._montar_prompts_geracao(
+            pergunta, contexto, usar_rag=usar_rag, historico=historico
+        )
+        mensagens_chat = [
+            {"role": "system", "content": system_prompt},
+            *self._normalizar_mensagens_historico(historico),
+            {"role": "user", "content": user_prompt},
+        ]
 
         inicio = time.perf_counter()
         if not self.api_key:
@@ -1057,46 +1425,58 @@ class GroqPitchService(_BasePitchLLMService):
                 "model": modelo_ativo,
                 "temperature": 0.1,
                 "stream": True,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                "messages": mensagens_chat,
             }
-            with httpx.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json=payload,
-                timeout=self.timeout_s,
-            ) as resp:
-                resp.raise_for_status()
-                for linha in resp.iter_lines():
-                    if not linha or not linha.startswith("data:"):
-                        continue
-                    data_str = linha[5:].strip()
-                    if data_str == "[DONE]":
-                        break
-                    chunk = json.loads(data_str)
-                    choices = chunk.get("choices") or []
-                    if choices:
-                        delta = choices[0].get("delta") or {}
-                        reasoning_delta = (
-                            delta.get("reasoning") or delta.get("reasoning_content") or ""
-                        )
-                        content_delta = delta.get("content") or ""
-                        mudou_r = parser.feed_reasoning(reasoning_delta)
-                        mudou_r2, mudou_c = parser.feed_content(content_delta)
-                        if (mudou_r or mudou_r2) and ao_receber_reasoning and parser.reasoning_text:
-                            ao_receber_reasoning(parser.reasoning_text)
-                        if mudou_c and ao_receber_conteudo and parser.content_text:
-                            ao_receber_conteudo(parser.content_text)
+            for tentativa in range(3):
+                parser = _ThinkStreamParser()
+                usage = {}
+                try:
+                    with httpx.stream(
+                        "POST",
+                        f"{self.base_url}/chat/completions",
+                        headers=self._headers(),
+                        json=payload,
+                        timeout=self.timeout_s,
+                    ) as resp:
+                        if getattr(resp, "status_code", 200) >= 400:
+                            try:
+                                resp.read()
+                            except (httpx.HTTPError, httpx.StreamError):
+                                pass
+                        resp.raise_for_status()
+                        for linha in resp.iter_lines():
+                            if not linha or not linha.startswith("data:"):
+                                continue
+                            data_str = linha[5:].strip()
+                            if data_str == "[DONE]":
+                                break
+                            chunk = json.loads(data_str)
+                            choices = chunk.get("choices") or []
+                            if choices:
+                                delta = choices[0].get("delta") or {}
+                                reasoning_delta = (
+                                    delta.get("reasoning") or delta.get("reasoning_content") or ""
+                                )
+                                content_delta = delta.get("content") or ""
+                                mudou_r = parser.feed_reasoning(reasoning_delta)
+                                mudou_r2, mudou_c = parser.feed_content(content_delta)
+                                if (mudou_r or mudou_r2) and ao_receber_reasoning and parser.reasoning_text:
+                                    ao_receber_reasoning(parser.reasoning_text)
+                                if mudou_c and ao_receber_conteudo and parser.content_text:
+                                    ao_receber_conteudo(parser.content_text)
 
-                    if isinstance(chunk.get("usage"), dict):
-                        usage = chunk["usage"]
-                    elif isinstance(chunk.get("x_groq"), dict) and isinstance(
-                        chunk["x_groq"].get("usage"), dict
-                    ):
-                        usage = chunk["x_groq"]["usage"]
+                            if isinstance(chunk.get("usage"), dict):
+                                usage = chunk["usage"]
+                            elif isinstance(chunk.get("x_groq"), dict) and isinstance(
+                                chunk["x_groq"].get("usage"), dict
+                            ):
+                                usage = chunk["x_groq"]["usage"]
+                    break
+                except httpx.HTTPStatusError as erro_http:
+                    if getattr(erro_http.response, "status_code", None) == 429 and tentativa < 2:
+                        time.sleep(min(2.0, 0.8 * (tentativa + 1)))
+                        continue
+                    raise
 
             parser.flush()
             if ao_receber_reasoning and parser.reasoning_text:
@@ -1136,27 +1516,50 @@ class GroqPitchService(_BasePitchLLMService):
                 llm_ms=round(llm_ms, 2),
                 prompt_enviado=prompt_completo,
             )
-        except (httpx.HTTPError, ValueError, KeyError, TypeError) as erro:
+        except (httpx.HTTPError, httpx.StreamError, ValueError, KeyError, TypeError) as erro:
             llm_ms = (time.perf_counter() - inicio) * 1000.0
             detalhe_erro = str(erro)
+            status_code = None
             if isinstance(erro, httpx.HTTPStatusError):
+                status_code = getattr(erro.response, "status_code", None)
                 try:
-                    erro.response.read()
+                    if not getattr(erro.response, "is_closed", True):
+                        erro.response.read()
                     msg_api = erro.response.json().get("error", {}).get("message")
                     if msg_api:
                         detalhe_erro = f"{detalhe_erro} — {msg_api}"
-                except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as parse_err:
+                except (
+                    httpx.HTTPError,
+                    httpx.StreamError,
+                    ValueError,
+                    KeyError,
+                    TypeError,
+                    AttributeError,
+                ) as parse_err:
                     logger.debug("Sem detalhes JSON na resposta Groq: %s", parse_err)
-            resumo_trechos = (
-                f"Base consultada retornou {len(contexto.trechos)} trecho(s) relevante(s): "
-                + (contexto.trechos[0].conteudo[:260] + "..." if contexto.trechos else "nenhum trecho.")
-            )
-            fallback_msg = (
-                f"Falha ao consultar a API Groq Cloud para o modelo `{modelo_ativo}` ({detalhe_erro}).\n\n"
-                f"Verifique se o modelo está ativo/habilitado na sua conta Groq ou selecione um modelo ativo "
-                f"(`qwen/qwen3.8-27b`, `openai/gpt-oss-20b`, `openai/gpt-oss-120b`).\n\n"
-                f"**Resumo direto do RAG:** {resumo_trechos}"
-            )
+
+            if status_code == 429:
+                fallback_msg = (
+                    f"Limite temporário de requisições/tokens da API Groq Cloud atingido (HTTP 429) "
+                    f"para o modelo `{modelo_ativo}` após várias perguntas seguidas.\n\n"
+                    "Aguarde alguns segundos antes de enviar a próxima mensagem ou selecione outro modelo "
+                    "no seletor no topo da tela."
+                )
+            else:
+                fallback_msg = (
+                    f"Falha ao consultar a API Groq Cloud para o modelo `{modelo_ativo}` ({detalhe_erro}).\n\n"
+                    f"Verifique se o modelo está ativo/habilitado na sua conta Groq ou selecione um modelo ativo "
+                    f"(`qwen/qwen3.8-27b`, `openai/gpt-oss-20b`, `openai/gpt-oss-120b`)."
+                )
+
+            if usar_rag and contexto.trechos:
+                resumo_trechos = (
+                    f"Base consultada retornou {len(contexto.trechos)} trecho(s) relevante(s): "
+                    + contexto.trechos[0].conteudo[:260]
+                    + "..."
+                )
+                fallback_msg = f"{fallback_msg}\n\n**Resumo direto do RAG:** {resumo_trechos}"
+
             return RespostaGeradaOllama(
                 resposta=fallback_msg,
                 citacoes=citacoes,
