@@ -2,10 +2,12 @@
 
 import unittest
 
+from sinergia.rag.pitch.ollama_service import DecisaoRoteamento
 from sinergia.rag.pitch.theme import (
     PALETA_MONOCROMATICA,
     obter_css_monocromatico_light,
     renderizar_badge_base,
+    renderizar_badges_roteamento,
     renderizar_barra_distribuicao,
     renderizar_card_kpi,
     renderizar_citacoes_html,
@@ -47,6 +49,20 @@ class TestPitchTheme(unittest.TestCase):
         emb_bars = renderizar_grafico_embedding_html([0.05, -0.03, 0.08])
         self.assertIn("sinergia-emb-bar-pos", emb_bars)
         self.assertIn("sinergia-emb-bar-neg", emb_bars)
+
+    def test_renderizar_badges_roteamento_sem_rag(self):
+        decisao = DecisaoRoteamento(
+            id_base=None,
+            codigo_base="CHAT",
+            nome_base="Chat Direto (Sem RAG)",
+            tool_name="nenhuma",
+            query_busca="",
+            modo_roteamento="guardrail_conversacional",
+            usar_rag=False,
+        )
+        badge = renderizar_badges_roteamento(decisao, ativo=True)
+        self.assertIn("Chat Direto · Sem consulta documental", badge)
+        self.assertIn("sinergia-badge-base--ativa", badge)
 
 
 if __name__ == "__main__":

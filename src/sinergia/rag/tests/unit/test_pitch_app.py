@@ -9,10 +9,13 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from sinergia.rag.interfaces import MetadadosTrecho, TrechoRecuperado
-from sinergia.rag.pitch.app import carregar_trechos_fallback_mocks, executar_turno_rag
+from sinergia.rag.pitch.app import (
+    carregar_trechos_fallback_mocks,
+    executar_turno_rag,
+    obter_historico_chat_sessao,
+)
 from sinergia.rag.pitch.ollama_service import (
     PRESETS_MODELOS_GROQ,
-    PRESETS_MODELOS_LOCAL,
     ChamadaFerramentaRAG,
     DecisaoRoteamento,
     GroqPitchService,
@@ -63,48 +66,56 @@ class TestPitchApp(unittest.TestCase):
     def test_fluxo_completo_apptest_visao_global_e_raio_x(
         self, mock_pg_check, mock_http_get, mock_http_post, mock_http_stream
     ):
-        def _dispatch_get(url, **_kwargs):
-            if "api.groq.com" in url:
-                return _fake_http_response(
-                    {"data": [{"id": "qwen/qwen3.8-27b"}, {"id": "openai/gpt-oss-20b"}]}
-                )
-            return _fake_http_response(
-                {"models": [{"name": "qwen2.5:3b"}, {"name": "qwen3.5:4b"}]}
-            )
-
-        mock_http_get.side_effect = _dispatch_get
+        mock_http_get.return_value = _fake_http_response(
+            {"data": [{"id": "qwen/qwen3.8-27b"}, {"id": "openai/gpt-oss-20b"}]}
+        )
         mock_http_post.return_value = _fake_http_response(
             {
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [
-                        {
-                            "function": {
-                                "name": "ferramenta_busca_pausas",
-                                "arguments": {"query": "pausa digitação NR-17"},
-                            }
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": "ferramenta_busca_pausas",
+                                        "arguments": '{"query": "pausa digitação NR-17"}',
+                                    }
+                                }
+                            ],
                         }
-                    ],
-                }
+                    }
+                ]
             }
         )
         mock_http_stream.return_value = _fake_stream_response(
             [
-                json.dumps(
+                "data: "
+                + json.dumps(
                     {
-                        "message": {
-                            "role": "assistant",
-                            "content": "Conforme a NR-17 (Item 17.6.4), a pausa é de 10 minutos a cada 50 minutos.",
-                        },
-                        "done": True,
-                        "prompt_eval_count": 450,
-                        "eval_count": 48,
-                        "load_duration": 10_000_000,
-                        "eval_duration": 800_000_000,
-                        "total_duration": 900_000_000,
+                        "choices": [
+                            {
+                                "delta": {
+                                    "content": "Conforme a NR-17 (Item 17.6.4), a pausa é de 10 minutos a cada 50 minutos.",
+                                }
+                            }
+                        ]
                     }
-                )
+                ),
+                "data: "
+                + json.dumps(
+                    {
+                        "choices": [],
+                        "usage": {
+                            "prompt_tokens": 450,
+                            "completion_tokens": 48,
+                            "queue_time": 0.02,
+                            "completion_time": 0.80,
+                            "total_time": 0.90,
+                        },
+                    }
+                ),
+                "data: [DONE]",
             ]
         )
 
@@ -136,22 +147,25 @@ class TestPitchApp(unittest.TestCase):
             ]
         )
 
-        with patch(
-            "sinergia.rag.pitch.app.obter_buscador_pitch", return_value=buscador_mock
+        with (
+            patch(
+                "sinergia.rag.pitch.app.obter_buscador_pitch", return_value=buscador_mock
+            ),
+            patch(
+                "sinergia.rag.pitch.app.obter_servico_groq",
+                return_value=GroqPitchService(api_key="gsk_test_key"),
+            ),
         ):
-            # 1. Carga inicial -> Visão Global por padrão
+            # 1. Carga inicial -> Visão Global por padrão, sem opção de LLM local e presetado em openai/gpt-oss-20b
             at = AppTest.from_file(APP_PATH, default_timeout=15).run()
             self.assertFalse(at.exception)
 
-            # Toggle Local/Cloud inicia ativo (Groq); alternar para Local (Ollama) para testar seletor local
-            self.assertEqual(len(at.toggle), 1)
-            self.assertTrue(at.toggle(key="provider_cloud_toggle").value)
-            at.toggle(key="provider_cloud_toggle").set_value(False).run()
-            self.assertFalse(at.exception)
+            self.assertEqual(len(at.toggle), 0)
             self.assertEqual(len(at.selectbox), 1)
+            self.assertEqual(at.selectbox(key="ollama_model_select").value, "openai/gpt-oss-20b")
             self.assertEqual(
-                at.selectbox[0].options,
-                ["qwen2.5:3b", "qwen3.5:4b", *PRESETS_MODELOS_LOCAL],
+                at.selectbox[0].options[:2],
+                ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"],
             )
             self.assertEqual(len(at.slider), 0)
 
@@ -202,17 +216,12 @@ class TestPitchApp(unittest.TestCase):
     @patch("sinergia.rag.pitch.ollama_service.httpx.post")
     @patch("sinergia.rag.pitch.ollama_service.httpx.get")
     @patch("sinergia.rag.pitch.app._banco_disponivel_com_dados", return_value=False)
-    def test_toggle_cloud_groq_alterna_provedor_e_executa_consulta(
+    def test_groq_preset_gpt_oss_20b_padrao_e_executa_consulta(
         self, mock_pg_check, mock_http_get, mock_http_post, mock_http_stream
     ):
-        def _dispatch_get(url, **_kwargs):
-            if "api.groq.com" in url:
-                return _fake_http_response(
-                    {"data": [{"id": "qwen/qwen3.8-27b"}, {"id": "openai/gpt-oss-20b"}]}
-                )
-            return _fake_http_response({"models": [{"name": "qwen2.5:3b"}]})
-
-        mock_http_get.side_effect = _dispatch_get
+        mock_http_get.return_value = _fake_http_response(
+            {"data": [{"id": "qwen/qwen3.8-27b"}, {"id": "openai/gpt-oss-20b"}]}
+        )
         mock_http_post.return_value = _fake_http_response(
             {
                 "choices": [
@@ -302,17 +311,14 @@ class TestPitchApp(unittest.TestCase):
             at = AppTest.from_file(APP_PATH, default_timeout=15).run()
             self.assertFalse(at.exception)
 
-            at.toggle(key="provider_cloud_toggle").set_value(True).run()
-            self.assertFalse(at.exception)
+            self.assertEqual(len(at.toggle), 0)
             self.assertEqual(
                 at.selectbox[0].options[:2],
-                ["qwen/qwen3.8-27b", "openai/gpt-oss-20b"],
+                ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"],
             )
             for p in PRESETS_MODELOS_GROQ:
                 self.assertIn(p, at.selectbox[0].options)
-
-            at.selectbox(key="ollama_model_select").select("openai/gpt-oss-20b").run()
-            self.assertFalse(at.exception)
+            self.assertEqual(at.selectbox(key="ollama_model_select").value, "openai/gpt-oss-20b")
 
             at.chat_input(key="chat_input_pitch").set_value(
                 "Qual a pausa na NR-17?"
@@ -420,6 +426,96 @@ class TestPitchApp(unittest.TestCase):
         self.assertIn("PCMSO NR-7", turno.prompt_enviado)
         self.assertIn("EPI NR-6", turno.prompt_enviado)
         self.assertEqual(turno.roteamento.codigos_combinados, "F4+F5")
+
+    def test_executar_turno_rag_guardrail_nao_busca_vetores_nem_retorna_pdfs(self):
+        buscador_mock = MagicMock()
+        servico_mock = MagicMock()
+        servico_mock.decidir_base_autonomamente.return_value = DecisaoRoteamento(
+            id_base=None,
+            codigo_base="CHAT",
+            nome_base="Chat Direto (Sem RAG)",
+            tool_name="nenhuma",
+            query_busca="",
+            modo_roteamento="guardrail_conversacional",
+            roteamento_ms=1.0,
+            chamadas=[],
+            usar_rag=False,
+        )
+        servico_mock.gerar_resposta_fundamentada.return_value = RespostaGeradaOllama(
+            resposta="Bom dia! Como posso ajudar você hoje no trabalho?",
+            citacoes=["PDF Indevido"],
+            metricas=MetricasOllama(modelo="openai/gpt-oss-20b"),
+            llm_ms=20.0,
+            prompt_enviado="prompt",
+        )
+
+        st.session_state.turnos = []
+        st.session_state.next_msg_id = 1
+        turno = executar_turno_rag(
+            pergunta="Olá",
+            modelo_selecionado="openai/gpt-oss-20b",
+            buscador=buscador_mock,
+            servico_llm=servico_mock,
+        )
+
+        buscador_mock.buscar_com_telemetria.assert_not_called()
+        self.assertFalse(turno.roteamento.usar_rag)
+        self.assertEqual(turno.citacoes, [])
+        self.assertEqual(turno.detalhes_trechos, [])
+        self.assertEqual(turno.estatisticas_embedding.dimensoes, 0)
+
+    def test_obter_historico_chat_sessao_e_continuidade_na_sessao(self):
+        buscador_mock = MagicMock()
+        servico_mock = MagicMock()
+        servico_mock.decidir_base_autonomamente.return_value = DecisaoRoteamento(
+            id_base=None,
+            codigo_base="CHAT",
+            nome_base="Chat Direto (Sem RAG)",
+            tool_name="nenhuma",
+            query_busca="",
+            modo_roteamento="guardrail_conversacional",
+            roteamento_ms=1.0,
+            chamadas=[],
+            usar_rag=False,
+        )
+        servico_mock.gerar_resposta_fundamentada.return_value = RespostaGeradaOllama(
+            resposta="Bom dia! Qual é a sua dúvida sobre ergonomia?",
+            citacoes=[],
+            metricas=MetricasOllama(modelo="openai/gpt-oss-20b"),
+            llm_ms=15.0,
+            prompt_enviado="prompt 1",
+        )
+
+        st.session_state.turnos = []
+        st.session_state.next_msg_id = 1
+        turno_1 = executar_turno_rag(
+            pergunta="Bom dia, ergonomia",
+            modelo_selecionado="openai/gpt-oss-20b",
+            buscador=buscador_mock,
+            servico_llm=servico_mock,
+        )
+        st.session_state.turnos.append(turno_1)
+
+        historico_extraido = obter_historico_chat_sessao()
+        self.assertEqual(
+            historico_extraido,
+            [
+                {"role": "user", "content": "Bom dia, ergonomia"},
+                {"role": "assistant", "content": "Bom dia! Qual é a sua dúvida sobre ergonomia?"},
+            ],
+        )
+
+        # Turno 2 deve receber automaticamente o histórico da sessão
+        executar_turno_rag(
+            pergunta="qual o tempo de pausa?",
+            modelo_selecionado="openai/gpt-oss-20b",
+            buscador=buscador_mock,
+            servico_llm=servico_mock,
+        )
+        kwargs_roteamento = servico_mock.decidir_base_autonomamente.call_args.kwargs
+        kwargs_geracao = servico_mock.gerar_resposta_fundamentada.call_args.kwargs
+        self.assertEqual(kwargs_roteamento["historico"], historico_extraido)
+        self.assertEqual(kwargs_geracao["historico"], historico_extraido)
 
 
 if __name__ == "__main__":

@@ -4,12 +4,15 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
+import httpx
+
 from sinergia.rag.interfaces import ContextoRAG, MetadadosTrecho, TrechoRecuperado
 from sinergia.rag.pitch.ollama_service import (
     PRESETS_MODELOS_GROQ,
     PRESETS_MODELOS_LOCAL,
     GroqPitchService,
     OllamaPitchService,
+    verificar_guardrail_conversacional,
 )
 
 
@@ -322,8 +325,8 @@ class TestGroqPitchService(unittest.TestCase):
         self.assertEqual(
             modelos,
             [
-                "qwen/qwen3.8-27b",
                 "openai/gpt-oss-20b",
+                "qwen/qwen3.8-27b",
                 "openai/gpt-oss-120b",
                 "openai/gpt-oss-safeguard-20b",
             ],
@@ -444,6 +447,154 @@ class TestGroqPitchService(unittest.TestCase):
         self.assertEqual(resp.metricas.eval_count, 45)
         self.assertAlmostEqual(resp.metricas.load_duration_ms, 50.0)
         self.assertAlmostEqual(resp.metricas.tokens_por_segundo, 300.0)
+
+    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
+    def test_guardrail_conversacional_bloqueia_saudacoes_e_termos_soltos(self, mock_post):
+        for msg in ("Olá", "Bom dia", "Oi, tudo bem?", "Obrigado!", "Bom dia, ergonomia", "Olá EPI"):
+            self.assertTrue(verificar_guardrail_conversacional(msg), msg)
+            decisao = self.groq.decidir_base_autonomamente(msg, modelo="openai/gpt-oss-20b")
+            self.assertFalse(decisao.usar_rag)
+            self.assertIsNone(decisao.id_base)
+            self.assertEqual(decisao.chamadas, [])
+            self.assertEqual(decisao.modo_roteamento, "guardrail_conversacional")
+            self.assertEqual(decisao.codigos_combinados, "CHAT")
+        mock_post.assert_not_called()
+
+    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
+    def test_guardrail_permite_saudacao_com_pergunta_de_dominio(self, mock_post):
+        self.assertFalse(verificar_guardrail_conversacional("Bom dia, qual a pausa da NR-17?"))
+        mock_post.return_value = _mock_response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": "ferramenta_busca_pausas",
+                                        "arguments": '{"query": "pausa NR-17"}',
+                                    }
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        )
+        decisao = self.groq.decidir_base_autonomamente(
+            "Bom dia, qual a pausa da NR-17?", modelo="openai/gpt-oss-20b"
+        )
+        self.assertTrue(decisao.usar_rag)
+        self.assertEqual(decisao.id_base, 1)
+        self.assertEqual(decisao.codigo_base, "F1")
+        mock_post.assert_called_once()
+
+    def test_prompts_geracao_focados_no_colaborador(self):
+        contexto = ContextoRAG(
+            query="pausa NR-17",
+            id_base=1,
+            trechos=[
+                TrechoRecuperado(
+                    id_trecho=1,
+                    conteudo="Pausa de 10 minutos para cada 50 minutos trabalhados.",
+                    metadados=MetadadosTrecho(
+                        titulo="NR-17",
+                        fonte="NR-17",
+                        versao="2024",
+                        secao="17.6.4",
+                        pagina=4,
+                        id_base=1,
+                    ),
+                )
+            ],
+            total_encontrado=1,
+        )
+        sys_rag, user_rag, _ = self.groq._montar_prompts_geracao(
+            "Qual a pausa?", contexto, usar_rag=True
+        )
+        self.assertIn("colaborador (trabalhador da empresa)", sys_rag.lower())
+        self.assertIn("Fontes recuperadas no RAG", user_rag)
+
+        sys_chat, user_chat, _ = self.groq._montar_prompts_geracao(
+            "Bom dia", ContextoRAG(), usar_rag=False
+        )
+        self.assertIn("colaborador (trabalhador da empresa)", sys_chat.lower())
+        self.assertIn("NÃO cite nomes de arquivos PDF", sys_chat)
+        self.assertNotIn("Fontes recuperadas no RAG", user_chat)
+
+    @patch("sinergia.rag.pitch.ollama_service.httpx.stream")
+    def test_historico_sessao_enviado_para_llm_e_roteamento_continuacao(self, mock_stream):
+        historico = [
+            {"role": "user", "content": "Bom dia, ergonomia"},
+            {"role": "assistant", "content": "Bom dia! Qual é a sua dúvida sobre ergonomia?"},
+        ]
+
+        # Continuação sem palavra-chave explícita no turno 2 deve usar histórico na heurística
+        decisao_heur = self.groq._decidir_heuristica("qual o limite?", 0.0, historico=historico)
+        self.assertEqual(decisao_heur.id_base, 1)
+        self.assertIn("ergonomia", decisao_heur.query_busca.lower())
+
+        mock_stream.return_value = _mock_stream_response(
+            [
+                "data: "
+                + json.dumps({"choices": [{"delta": {"content": "Por nada! Estou à disposição."}}]}),
+                "data: "
+                + json.dumps(
+                    {
+                        "choices": [],
+                        "usage": {"prompt_tokens": 120, "completion_tokens": 15, "completion_time": 0.1},
+                    }
+                ),
+                "data: [DONE]",
+            ]
+        )
+
+        resp = self.groq.gerar_resposta_fundamentada(
+            pergunta="Obrigado",
+            contexto=ContextoRAG(),
+            modelo="openai/gpt-oss-20b",
+            usar_rag=False,
+            historico=historico,
+        )
+        self.assertEqual(resp.citacoes, [])
+        self.assertIn("Bom dia, ergonomia", resp.prompt_enviado)
+        payload_enviado = mock_stream.call_args.kwargs["json"]
+        roles_enviadas = [m["role"] for m in payload_enviado["messages"]]
+        self.assertEqual(roles_enviadas, ["system", "user", "assistant", "user"])
+        self.assertEqual(payload_enviado["messages"][1]["content"], "Bom dia, ergonomia")
+
+    @patch("sinergia.rag.pitch.ollama_service.time.sleep")
+    @patch("sinergia.rag.pitch.ollama_service.httpx.stream")
+    def test_groq_gerar_resposta_trata_erro_429_stream_fechado_sem_crash(
+        self, mock_stream, mock_sleep
+    ):
+        req = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.is_closed = True
+        resp_429.read.side_effect = httpx.StreamClosed()
+        erro_429 = httpx.HTTPStatusError("429 Too Many Requests", request=req, response=resp_429)
+        resp_429.raise_for_status.side_effect = erro_429
+
+        cm = MagicMock()
+        cm.__enter__.return_value = resp_429
+        cm.__exit__.return_value = False
+        mock_stream.return_value = cm
+
+        resultado = self.groq.gerar_resposta_fundamentada(
+            pergunta="Bom dia",
+            contexto=ContextoRAG(),
+            modelo="openai/gpt-oss-20b",
+            usar_rag=False,
+        )
+
+        self.assertEqual(mock_stream.call_count, 3)
+        self.assertEqual(mock_sleep.call_count, 2)
+        self.assertIn("429", resultado.resposta)
+        self.assertIn("Limite temporário", resultado.resposta)
+        self.assertNotIn("Resumo direto do RAG", resultado.resposta)
+        self.assertEqual(resultado.citacoes, [])
 
 
 if __name__ == "__main__":
