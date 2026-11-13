@@ -2,10 +2,81 @@
 
 import math
 import os
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from sinergia.rag.embeddings import GeradorEmbeddings, get_gerador_embeddings
-from sinergia.rag.interfaces import ContextoRAG, MetadadosTrecho, TrechoRecuperado
+from sinergia.rag.embeddings import MODELO_PADRAO, GeradorEmbeddings, get_gerador_embeddings
+from sinergia.rag.interfaces import (
+    ContextoRAG,
+    DetalheScoreTrecho,
+    EstatisticasEmbedding,
+    MetadadosTrecho,
+    ResultadoBuscaInstrumentada,
+    TrechoRecuperado,
+)
+
+
+def calcular_rrf_detalhado(
+    densos: List[TrechoRecuperado],
+    lexicos: List[TrechoRecuperado],
+    k: int = 60,
+    top_k: int = 4,
+) -> Tuple[List[TrechoRecuperado], List[DetalheScoreTrecho]]:
+    """Combina ranqueamentos denso e léxico com RRF, preservando scores e ranks individuais."""
+    scores: Dict[Any, float] = {}
+    trechos_map: Dict[Any, TrechoRecuperado] = {}
+    dense_scores: Dict[Any, float] = {}
+    dense_ranks: Dict[Any, int] = {}
+    lex_scores: Dict[Any, float] = {}
+    lex_ranks: Dict[Any, int] = {}
+
+    def _get_chave(t: TrechoRecuperado) -> Any:
+        return t.id_trecho if t.id_trecho is not None else hash(t.conteudo)
+
+    for rank_idx, trecho in enumerate(densos, start=1):
+        chave = _get_chave(trecho)
+        trechos_map[chave] = trecho
+        dense_scores[chave] = float(trecho.score)
+        dense_ranks[chave] = rank_idx
+        scores[chave] = scores.get(chave, 0.0) + (1.0 / (k + rank_idx))
+
+    for rank_idx, trecho in enumerate(lexicos, start=1):
+        chave = _get_chave(trecho)
+        if chave not in trechos_map:
+            trechos_map[chave] = trecho
+        lex_scores[chave] = float(trecho.score)
+        lex_ranks[chave] = rank_idx
+        scores[chave] = scores.get(chave, 0.0) + (1.0 / (k + rank_idx))
+
+    chaves_ordenadas = sorted(scores.keys(), key=lambda ch: scores[ch], reverse=True)
+
+    resultado: List[TrechoRecuperado] = []
+    detalhes: List[DetalheScoreTrecho] = []
+    for chave in chaves_ordenadas[:top_k]:
+        trecho_orig = trechos_map[chave]
+        rrf_val = float(scores[chave])
+        resultado.append(
+            TrechoRecuperado(
+                id_trecho=trecho_orig.id_trecho,
+                conteudo=trecho_orig.conteudo,
+                score=rrf_val,
+                metadados=trecho_orig.metadados,
+            )
+        )
+        detalhes.append(
+            DetalheScoreTrecho(
+                id_trecho=trecho_orig.id_trecho,
+                conteudo=trecho_orig.conteudo,
+                metadados=trecho_orig.metadados,
+                rrf_score=rrf_val,
+                dense_score=dense_scores.get(chave, 0.0),
+                dense_rank=dense_ranks.get(chave),
+                lex_score=lex_scores.get(chave, 0.0),
+                lex_rank=lex_ranks.get(chave),
+            )
+        )
+
+    return resultado, detalhes
 
 
 def calcular_rrf(
@@ -25,41 +96,39 @@ def calcular_rrf(
     #    onde valores menores de k (ex: k=20 ou k=30) ou pesos diferenciados podem priorizar melhor a semântica.
     # 3. Considerar inclusão de Re-ranking cross-encoder (ex: bge-reranker ou flashrank) pós-recuperação inicial
     #    para validar se a eficácia e precisão do Top-K aumentam significativamente.
-    scores: Dict[Any, float] = {}
-    trechos_map: Dict[Any, TrechoRecuperado] = {}
-
-    def _get_chave(t: TrechoRecuperado) -> Any:
-        return t.id_trecho if t.id_trecho is not None else hash(t.conteudo)
-
-    # Computar scores do ranqueamento denso
-    for rank_idx, trecho in enumerate(densos, start=1):
-        chave = _get_chave(trecho)
-        trechos_map[chave] = trecho
-        scores[chave] = scores.get(chave, 0.0) + (1.0 / (k + rank_idx))
-
-    # Computar scores do ranqueamento léxico
-    for rank_idx, trecho in enumerate(lexicos, start=1):
-        chave = _get_chave(trecho)
-        if chave not in trechos_map:
-            trechos_map[chave] = trecho
-        scores[chave] = scores.get(chave, 0.0) + (1.0 / (k + rank_idx))
-
-    # Ordenar por maior pontuação RRF
-    chaves_ordenadas = sorted(scores.keys(), key=lambda ch: scores[ch], reverse=True)
-
-    resultado: List[TrechoRecuperado] = []
-    for chave in chaves_ordenadas[:top_k]:
-        trecho_orig = trechos_map[chave]
-        # Criar nova instância com o score RRF calculado
-        trecho_atualizado = TrechoRecuperado(
-            id_trecho=trecho_orig.id_trecho,
-            conteudo=trecho_orig.conteudo,
-            score=scores[chave],
-            metadados=trecho_orig.metadados,
-        )
-        resultado.append(trecho_atualizado)
-
+    resultado, _ = calcular_rrf_detalhado(densos=densos, lexicos=lexicos, k=k, top_k=top_k)
     return resultado
+
+
+def _calcular_estatisticas_embedding(
+    vetor: List[float],
+    modelo: str = MODELO_PADRAO,
+    tamanho_amostra: int = 12,
+) -> EstatisticasEmbedding:
+    """Computa norma L2, extremos, média e amostra das primeiras dimensões de um vetor."""
+    if not vetor:
+        return EstatisticasEmbedding(
+            modelo=modelo,
+            dimensoes=0,
+            norma_l2=0.0,
+            min_val=0.0,
+            max_val=0.0,
+            mean_val=0.0,
+            amostra=[],
+            vetor=[],
+        )
+
+    norma = math.sqrt(sum(x * x for x in vetor))
+    return EstatisticasEmbedding(
+        modelo=modelo,
+        dimensoes=len(vetor),
+        norma_l2=round(norma, 6),
+        min_val=round(min(vetor), 6),
+        max_val=round(max(vetor), 6),
+        mean_val=round(sum(vetor) / len(vetor), 6),
+        amostra=[round(float(x), 6) for x in vetor[:tamanho_amostra]],
+        vetor=[float(x) for x in vetor],
+    )
 
 
 def _similaridade_cosseno(v1: List[float], v2: List[float]) -> float:
@@ -98,7 +167,9 @@ class BuscadorHibrido:
             vetor = self.gerador_embeddings.gerar_embedding(t.conteudo)
             self._trechos_memoria.append((t, vetor))
 
-    def _buscar_memoria(self, query: str, id_base: int) -> Tuple[List[TrechoRecuperado], List[TrechoRecuperado]]:
+    def _buscar_memoria(
+        self, query: str, id_base: int, vetor_query: Optional[List[float]] = None
+    ) -> Tuple[List[TrechoRecuperado], List[TrechoRecuperado]]:
         """Realiza busca densa e léxica sobre os dados em memória aplicando filtros de base e vigência."""
         # Pré-filtro estrito: id_base e vigente
         candidatos = [
@@ -110,7 +181,8 @@ class BuscadorHibrido:
         if not candidatos:
             return [], []
 
-        vetor_query = self.gerador_embeddings.gerar_embedding(query)
+        if vetor_query is None:
+            vetor_query = self.gerador_embeddings.gerar_embedding(query)
 
         # 1. Busca Densa (cosseno)
         scores_densos = [
@@ -152,14 +224,15 @@ class BuscadorHibrido:
         return densos, lexicos
 
     def _buscar_banco(
-        self, query: str, id_base: int
+        self, query: str, id_base: int, vetor_query: Optional[List[float]] = None
     ) -> Optional[Tuple[List[TrechoRecuperado], List[TrechoRecuperado]]]:
         """Tenta executar consulta no PostgreSQL com pgvector e Full-Text Search se disponível."""
         try:
             import psycopg
             with psycopg.connect(self.database_url, connect_timeout=2) as conn:
                 with conn.cursor() as cur:
-                    vetor_query = self.gerador_embeddings.gerar_embedding(query)
+                    if vetor_query is None:
+                        vetor_query = self.gerador_embeddings.gerar_embedding(query)
                     vetor_str = "[" + ",".join(str(x) for x in vetor_query) + "]"
 
                     # 1. Busca densa pgvector com score de similaridade de cosseno
@@ -284,4 +357,58 @@ class BuscadorHibrido:
             trechos=top_trechos,
             total_encontrado=len(top_trechos),
         )
+
+    def buscar_com_telemetria(
+        self, query: str, id_base: int, limite: int = 4
+    ) -> ResultadoBuscaInstrumentada:
+        """Executa busca híbrida retornando ContextoRAG e artefatos completos de telemetria."""
+        limite_efetivo = limite if limite is not None else self.top_k
+
+        t0_embed = time.perf_counter()
+        vetor_query = self.gerador_embeddings.gerar_embedding(query)
+        embed_ms = (time.perf_counter() - t0_embed) * 1000.0
+
+        modelo_nome = getattr(self.gerador_embeddings, "model_name", MODELO_PADRAO)
+        if not isinstance(modelo_nome, str):
+            modelo_nome = MODELO_PADRAO
+        estatisticas_embedding = _calcular_estatisticas_embedding(vetor_query, modelo=modelo_nome)
+
+        t0_db = time.perf_counter()
+        if self._trechos_memoria:
+            densos, lexicos = self._buscar_memoria(query, id_base, vetor_query=vetor_query)
+        else:
+            try:
+                resultado_banco = self._buscar_banco(query, id_base, vetor_query=vetor_query)
+            except TypeError:
+                resultado_banco = self._buscar_banco(query, id_base)
+
+            if resultado_banco is not None:
+                densos, lexicos = resultado_banco
+            else:
+                densos, lexicos = self._buscar_memoria(query, id_base, vetor_query=vetor_query)
+
+        top_trechos, detalhes_trechos = calcular_rrf_detalhado(
+            densos=densos,
+            lexicos=lexicos,
+            k=self.k_rrf,
+            top_k=limite_efetivo,
+        )
+        top_trechos = top_trechos[:limite_efetivo]
+        detalhes_trechos = detalhes_trechos[:limite_efetivo]
+        db_rrf_ms = (time.perf_counter() - t0_db) * 1000.0
+
+        contexto = ContextoRAG(
+            query=query,
+            id_base=id_base,
+            trechos=top_trechos,
+            total_encontrado=len(top_trechos),
+        )
+        return ResultadoBuscaInstrumentada(
+            contexto=contexto,
+            embed_ms=round(embed_ms, 2),
+            db_rrf_ms=round(db_rrf_ms, 2),
+            estatisticas_embedding=estatisticas_embedding,
+            detalhes_trechos=detalhes_trechos,
+        )
+
 

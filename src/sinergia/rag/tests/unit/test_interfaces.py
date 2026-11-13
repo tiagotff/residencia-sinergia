@@ -1,5 +1,12 @@
 import unittest
-from sinergia.rag.interfaces import MetadadosTrecho, TrechoRecuperado, ContextoRAG
+from sinergia.rag.interfaces import (
+    ContextoRAG,
+    DetalheScoreTrecho,
+    EstatisticasEmbedding,
+    MetadadosTrecho,
+    ResultadoBuscaInstrumentada,
+    TrechoRecuperado,
+)
 
 
 class TestInterfacesRAG(unittest.TestCase):
@@ -108,6 +115,66 @@ class TestInterfacesRAG(unittest.TestCase):
         self.assertEqual(len(data["trechos"]), 1)
         self.assertEqual(data["trechos"][0]["metadados"]["titulo"], "PCMSO")
         self.assertEqual(data["trechos"][0]["metadados"]["extra"]["hierarquia"], ["H1", "H2"])
+
+    def test_modelos_telemetria_serializacao(self):
+        meta = MetadadosTrecho(
+            id_documento=1,
+            titulo="NR-17 Ergonomia",
+            fonte="Portaria MTP nº 423",
+            versao="2024.1",
+            secao="Item 17.6.4",
+            pagina=4,
+            id_base=1,
+            vigente=True,
+        )
+        trecho = TrechoRecuperado(
+            id_trecho=42,
+            conteudo="Pausa de 10 minutos para cada 50 minutos trabalhados.",
+            score=0.0328,
+            metadados=meta,
+        )
+        detalhe = DetalheScoreTrecho(
+            id_trecho=42,
+            conteudo=trecho.conteudo,
+            metadados=meta,
+            rrf_score=0.0328,
+            dense_score=0.8412,
+            dense_rank=1,
+            lex_score=0.4120,
+            lex_rank=1,
+        )
+        stats = EstatisticasEmbedding(
+            modelo="tardellirs/colibri-embed-ptbr",
+            dimensoes=768,
+            norma_l2=1.0,
+            min_val=-0.11,
+            max_val=0.13,
+            mean_val=0.001,
+            amostra=[0.01, -0.02],
+            vetor=[0.01, -0.02],
+        )
+        contexto = ContextoRAG(
+            query="pausa digitação",
+            id_base=1,
+            trechos=[trecho],
+            total_encontrado=1,
+        )
+        resultado = ResultadoBuscaInstrumentada(
+            contexto=contexto,
+            embed_ms=15.2,
+            db_rrf_ms=6.8,
+            estatisticas_embedding=stats,
+            detalhes_trechos=[detalhe],
+        )
+
+        dumped = resultado.model_dump()
+        self.assertEqual(dumped["embed_ms"], 15.2)
+        self.assertEqual(dumped["db_rrf_ms"], 6.8)
+        self.assertEqual(dumped["estatisticas_embedding"]["dimensoes"], 768)
+        self.assertEqual(dumped["detalhes_trechos"][0]["dense_rank"], 1)
+        self.assertEqual(dumped["detalhes_trechos"][0]["lex_rank"], 1)
+        self.assertAlmostEqual(dumped["detalhes_trechos"][0]["rrf_score"], 0.0328)
+        self.assertEqual(dumped["contexto"]["total_encontrado"], 1)
 
 
 if __name__ == "__main__":
