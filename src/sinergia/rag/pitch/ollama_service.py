@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -10,7 +11,7 @@ from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from sinergia.rag.interfaces import ContextoRAG
 
@@ -95,18 +96,104 @@ TOOL_NAME_TO_BASE_ID: dict[str, int] = {
 }
 
 
-class DecisaoRoteamento(BaseModel):
-    """Resultado do roteamento autônomo da LLM para escolha da base RAG."""
+class ChamadaFerramentaRAG(BaseModel):
+    """Representa uma chamada individual de ferramenta RAG ponderada para uma base (F1..F5)."""
 
     id_base: int = Field(..., ge=1, le=5, description="ID da base escolhida (1 a 5)")
     codigo_base: str = Field(..., description="Código da base (F1 a F5)")
     nome_base: str = Field(..., description="Nome do domínio da base")
     tool_name: str = Field(..., description="Nome da ferramenta selecionada")
     query_busca: str = Field(..., description="Query refinada para busca no RAG")
+    peso: float = Field(
+        default=1.0, ge=0.0, le=1.0, description="Peso normalizado de relevância (0..1)"
+    )
+    limite_trechos: int = Field(
+        default=4, ge=1, description="Quantidade de trechos alocados pelo peso"
+    )
+
+
+def calcular_alocacao_trechos(
+    pesos_brutos: list[float], orcamento_multi: int = 6, limite_unico: int = 4
+) -> tuple[list[float], list[int]]:
+    """Normaliza pesos de relevância e distribui o orçamento de trechos proporcionalmente."""
+    n = len(pesos_brutos)
+    if n == 0:
+        return [], []
+    if n == 1:
+        return [1.0], [limite_unico]
+
+    clamped = [max(0.05, float(w)) for w in pesos_brutos]
+    soma = sum(clamped)
+    pesos_norm = [round(w / soma, 4) for w in clamped]
+    diferenca = round(1.0 - sum(pesos_norm), 4)
+    if diferenca != 0.0:
+        pesos_norm[0] = round(max(0.0, min(1.0, pesos_norm[0] + diferenca)), 4)
+
+    orcamento_efetivo = max(n, orcamento_multi)
+    alocados = [1] * n
+    restante = orcamento_efetivo - n
+    if restante > 0:
+        quotas = [p * restante for p in pesos_norm]
+        partes_inteiras = [math.floor(q) for q in quotas]
+        for i in range(n):
+            alocados[i] += partes_inteiras[i]
+        sobra = restante - sum(partes_inteiras)
+        if sobra > 0:
+            indices_ordenados = sorted(
+                range(n),
+                key=lambda i: (quotas[i] - partes_inteiras[i], pesos_norm[i], -i),
+                reverse=True,
+            )
+            for idx in indices_ordenados[:sobra]:
+                alocados[idx] += 1
+
+    return pesos_norm, alocados
+
+
+class DecisaoRoteamento(BaseModel):
+    """Resultado do roteamento autônomo da LLM para escolha da(s) base(s) RAG."""
+
+    id_base: int = Field(..., ge=1, le=5, description="ID da base principal escolhida (1 a 5)")
+    codigo_base: str = Field(..., description="Código da base principal (F1 a F5)")
+    nome_base: str = Field(..., description="Nome do domínio da base principal")
+    tool_name: str = Field(..., description="Nome da ferramenta principal selecionada")
+    query_busca: str = Field(..., description="Query refinada para busca no RAG")
     modo_roteamento: str = Field(
         ..., description="Estratégia usada: tool_calling, json_fallback ou heuristic_fallback"
     )
     roteamento_ms: float = Field(default=0.0, description="Tempo gasto no roteamento em ms")
+    chamadas: list[ChamadaFerramentaRAG] = Field(
+        default_factory=list,
+        description="Lista ordenada por peso das ferramentas acionadas no turno",
+    )
+
+    @model_validator(mode="after")
+    def _garantir_chamadas_preenchidas(self) -> "DecisaoRoteamento":
+        if not self.chamadas:
+            self.chamadas = [
+                ChamadaFerramentaRAG(
+                    id_base=self.id_base,
+                    codigo_base=self.codigo_base,
+                    nome_base=self.nome_base,
+                    tool_name=self.tool_name,
+                    query_busca=self.query_busca,
+                    peso=1.0,
+                    limite_trechos=4,
+                )
+            ]
+        return self
+
+    @property
+    def codigos_combinados(self) -> str:
+        """Retorna os códigos das bases acionadas unidos por '+' (ex: 'F4+F5')."""
+        if self.chamadas:
+            return "+".join(c.codigo_base for c in self.chamadas)
+        return self.codigo_base
+
+    @property
+    def multi_base(self) -> bool:
+        """Indica se mais de uma base foi acionada neste turno."""
+        return len(self.chamadas) > 1
 
 
 class MetricasOllama(BaseModel):
@@ -132,8 +219,11 @@ class RespostaGeradaOllama(BaseModel):
     prompt_enviado: str = Field(..., description="Prompt completo enviado para geração")
 
 
+TOOL_NAME_MULTI_BASE = "ferramenta_busca_multiplas_bases"
+
+
 def _construir_definicoes_tools() -> list[dict[str, Any]]:
-    """Constrói o schema OpenAI/Ollama de tool calling para as 5 ferramentas RAG."""
+    """Constrói o schema OpenAI/Ollama de tool calling para as 5 ferramentas RAG + multi-base."""
     tools = []
     for info in MAPA_BASES_FERRAMENTAS.values():
         tools.append(
@@ -148,13 +238,64 @@ def _construir_definicoes_tools() -> list[dict[str, Any]]:
                             "query": {
                                 "type": "string",
                                 "description": "Termos-chave da consulta em português para busca híbrida.",
-                            }
+                            },
+                            "peso": {
+                                "type": "number",
+                                "description": (
+                                    "Peso de relevância desta base na pergunta do colaborador (0.1 a 1.0). "
+                                    "Se a pergunta focar mais em um tema, atribua peso maior a ele."
+                                ),
+                            },
                         },
                         "required": ["query"],
                     },
                 },
             }
         )
+    tools.append(
+        {
+            "type": "function",
+            "function": {
+                "name": TOOL_NAME_MULTI_BASE,
+                "description": (
+                    "Obrigatória quando a pergunta abordar DOIS OU MAIS temas/bases diferentes ao mesmo tempo "
+                    "(ex: saúde ocupacional + EPI, ergonomia + CLT). "
+                    "Mapeamento de id_base: 1=Pausas/Ergonomia (NR-17), 2=Direitos/Benefícios (CLT), "
+                    "3=Procedimentos/Treinamentos (POPs), 4=Saúde Ocupacional (PCMSO/NR-7), 5=EPIs/CA (NR-6)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "consultas": {
+                            "type": "array",
+                            "description": "Lista das bases relevantes (inclua apenas as estritamente relacionadas à pergunta).",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id_base": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 5,
+                                        "description": "ID da base (1 a 5).",
+                                    },
+                                    "query": {
+                                        "type": "string",
+                                        "description": "Termos-chave em português específicos para essa base.",
+                                    },
+                                    "peso": {
+                                        "type": "number",
+                                        "description": "Peso de relevância (0.1 a 1.0) conforme o foco da pergunta.",
+                                    },
+                                },
+                                "required": ["id_base", "query", "peso"],
+                            },
+                        }
+                    },
+                    "required": ["consultas"],
+                },
+            },
+        }
+    )
     return tools
 
 
@@ -301,23 +442,78 @@ class _BasePitchLLMService:
             return disponiveis[0]
         return self.modelo_padrao or self.modelo_fallback_padrao
 
+    def _construir_decisao_multipla(
+        self,
+        itens_brutos: list[tuple[int, str, float]],
+        modo: str,
+        inicio: float,
+    ) -> DecisaoRoteamento:
+        """Consolida chamadas por base, ordena por peso e calcula a alocação proporcional."""
+        consolidados_map: dict[int, tuple[list[str], float, int]] = {}
+        for idx, (id_base, query, peso_bruto) in enumerate(itens_brutos):
+            base_valido = id_base if id_base in MAPA_BASES_FERRAMENTAS else 1
+            query_limpa = (query or "").strip() or "consulta geral"
+            try:
+                peso_val = max(0.05, float(peso_bruto))
+            except (TypeError, ValueError):
+                peso_val = 1.0
+
+            if base_valido not in consolidados_map:
+                consolidados_map[base_valido] = ([query_limpa], peso_val, idx)
+            else:
+                queries_existentes, peso_acum, ordem_orig = consolidados_map[base_valido]
+                if query_limpa not in queries_existentes:
+                    queries_existentes.append(query_limpa)
+                consolidados_map[base_valido] = (
+                    queries_existentes,
+                    peso_acum + peso_val,
+                    ordem_orig,
+                )
+
+        if not consolidados_map:
+            consolidados_map[1] = (["consulta geral"], 1.0, 0)
+
+        ordenados = sorted(
+            consolidados_map.items(),
+            key=lambda kv: (-kv[1][1], kv[1][2]),
+        )[:5]
+
+        pesos_norm, limites = calcular_alocacao_trechos([item[1][1] for item in ordenados])
+
+        chamadas: list[ChamadaFerramentaRAG] = []
+        for (id_b, (queries, _, _)), peso_n, limite_t in zip(ordenados, pesos_norm, limites):
+            info = MAPA_BASES_FERRAMENTAS[id_b]
+            chamadas.append(
+                ChamadaFerramentaRAG(
+                    id_base=id_b,
+                    codigo_base=info["codigo"],
+                    nome_base=info["nome"],
+                    tool_name=info["tool_name"],
+                    query_busca=" ".join(queries),
+                    peso=peso_n,
+                    limite_trechos=limite_t,
+                )
+            )
+
+        principal = chamadas[0]
+        return DecisaoRoteamento(
+            id_base=principal.id_base,
+            codigo_base=principal.codigo_base,
+            nome_base=principal.nome_base,
+            tool_name=principal.tool_name,
+            query_busca=principal.query_busca,
+            modo_roteamento=modo,
+            roteamento_ms=round((time.perf_counter() - inicio) * 1000.0, 2),
+            chamadas=chamadas,
+        )
+
     def _construir_decisao(
         self, id_base: int, query_busca: str, modo: str, inicio: float
     ) -> DecisaoRoteamento:
-        base_id_valido = id_base if id_base in MAPA_BASES_FERRAMENTAS else 1
-        info = MAPA_BASES_FERRAMENTAS[base_id_valido]
-        return DecisaoRoteamento(
-            id_base=base_id_valido,
-            codigo_base=info["codigo"],
-            nome_base=info["nome"],
-            tool_name=info["tool_name"],
-            query_busca=query_busca.strip() or "consulta geral",
-            modo_roteamento=modo,
-            roteamento_ms=round((time.perf_counter() - inicio) * 1000.0, 2),
-        )
+        return self._construir_decisao_multipla([(id_base, query_busca, 1.0)], modo, inicio)
 
     def _decidir_heuristica(self, pergunta: str, inicio: float) -> DecisaoRoteamento:
-        """Fallback determinístico por palavras-chave caso o provedor esteja indisponível."""
+        """Fallback determinístico por palavras-chave com peso proporcional ao número de matches."""
         texto = pergunta.lower()
         regras = [
             (5, ("epi", "ca ", "ca-", "nr-6", "nr 6", "luva", "capacete", "óculos", "oculos", "protetor", "substituição")),
@@ -326,9 +522,13 @@ class _BasePitchLLMService:
             (2, ("clt", "casamento", "falta", "benefício", "beneficio", "férias", "ferias", "licença", "licenca", "473", "direito")),
             (1, ("nr-17", "nr 17", "pausa", "digitação", "digitacao", "ergonomia", "descanso", "postura", "toques")),
         ]
+        encontradas: list[tuple[int, str, float]] = []
         for id_base, termos in regras:
-            if any(termo in texto for termo in termos):
-                return self._construir_decisao(id_base, pergunta, "heuristic_fallback", inicio)
+            matches = sum(1 for termo in termos if termo in texto)
+            if matches > 0:
+                encontradas.append((id_base, pergunta, float(matches)))
+        if encontradas:
+            return self._construir_decisao_multipla(encontradas, "heuristic_fallback", inicio)
         return self._construir_decisao(1, pergunta, "heuristic_fallback", inicio)
 
     def _parsear_tool_calls(
@@ -336,38 +536,122 @@ class _BasePitchLLMService:
     ) -> DecisaoRoteamento | None:
         if not tool_calls:
             return None
-        fn = tool_calls[0].get("function", {})
-        tool_name = fn.get("name", "")
-        if tool_name not in TOOL_NAME_TO_BASE_ID:
-            return None
-        args = fn.get("arguments", {})
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except json.JSONDecodeError:
+        itens: list[tuple[int, str, float]] = []
+        for tc in tool_calls:
+            fn = tc.get("function", {})
+            tool_name = fn.get("name", "")
+            args = fn.get("arguments", {})
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {}
+            if not isinstance(args, dict):
                 args = {}
-        query_busca = str(args.get("query") or pergunta)
-        return self._construir_decisao(
-            TOOL_NAME_TO_BASE_ID[tool_name], query_busca, "tool_calling", inicio
-        )
+
+            if tool_name == TOOL_NAME_MULTI_BASE:
+                consultas = args.get("consultas") or []
+                if isinstance(consultas, list):
+                    for c in consultas:
+                        if not isinstance(c, dict):
+                            continue
+                        id_b = self._resolver_id_base_item(c)
+                        if id_b is None:
+                            continue
+                        q = str(c.get("query") or pergunta)
+                        try:
+                            p = float(c.get("peso", 1.0))
+                        except (TypeError, ValueError):
+                            p = 1.0
+                        itens.append((id_b, q, p))
+                continue
+
+            if tool_name not in TOOL_NAME_TO_BASE_ID:
+                continue
+            query_busca = str(args.get("query") or pergunta)
+            try:
+                peso = float(args.get("peso", 1.0))
+            except (TypeError, ValueError):
+                peso = 1.0
+            itens.append((TOOL_NAME_TO_BASE_ID[tool_name], query_busca, peso))
+        if not itens:
+            return None
+        return self._construir_decisao_multipla(itens, "tool_calling", inicio)
+
+    @staticmethod
+    def _resolver_id_base_item(item: dict[str, Any]) -> int | None:
+        """Resolve id_base a partir de inteiro, código F1..F5 ou tool_name."""
+        raw_id = item.get("id_base")
+        if raw_id is not None:
+            if isinstance(raw_id, str) and raw_id.strip().upper().startswith("F"):
+                try:
+                    val = int(raw_id.strip()[1:])
+                    return val if val in MAPA_BASES_FERRAMENTAS else None
+                except ValueError:
+                    pass
+            try:
+                val = int(raw_id)
+                return val if val in MAPA_BASES_FERRAMENTAS else None
+            except (TypeError, ValueError):
+                pass
+        t_name = item.get("tool_name")
+        if isinstance(t_name, str) and t_name in TOOL_NAME_TO_BASE_ID:
+            return TOOL_NAME_TO_BASE_ID[t_name]
+        return None
 
     def _parsear_json_roteamento(
         self, conteudo: str, pergunta: str, inicio: float
     ) -> DecisaoRoteamento | None:
         parsed = json.loads(conteudo or "{}")
-        id_base = int(parsed.get("id_base", 0))
-        if id_base not in MAPA_BASES_FERRAMENTAS:
+        if not isinstance(parsed, dict):
             return None
-        query_busca = str(parsed.get("query") or pergunta)
-        return self._construir_decisao(id_base, query_busca, "json_fallback", inicio)
+
+        consultas = parsed.get("consultas")
+        itens: list[tuple[int, str, float]] = []
+        if isinstance(consultas, list):
+            for c in consultas:
+                if not isinstance(c, dict):
+                    continue
+                try:
+                    id_b = int(c.get("id_base", 0))
+                except (TypeError, ValueError):
+                    continue
+                if id_b not in MAPA_BASES_FERRAMENTAS:
+                    continue
+                q = str(c.get("query") or pergunta)
+                try:
+                    p = float(c.get("peso", 1.0))
+                except (TypeError, ValueError):
+                    p = 1.0
+                itens.append((id_b, q, p))
+        else:
+            try:
+                id_base = int(parsed.get("id_base", 0))
+            except (TypeError, ValueError):
+                id_base = 0
+            if id_base in MAPA_BASES_FERRAMENTAS:
+                query_busca = str(parsed.get("query") or pergunta)
+                try:
+                    peso = float(parsed.get("peso", 1.0))
+                except (TypeError, ValueError):
+                    peso = 1.0
+                itens.append((id_base, query_busca, peso))
+
+        if not itens:
+            return None
+        return self._construir_decisao_multipla(itens, "json_fallback", inicio)
 
     def _mensagens_roteamento_tool(self, pergunta: str) -> list[dict[str, str]]:
         return [
             {
                 "role": "system",
                 "content": (
-                    "Você é o roteador do SinergIA. Selecione exatamente UMA ferramenta (F1..F5) "
-                    "mais adequada para responder à pergunta do colaborador e forneça uma query objetiva."
+                    "Você é o roteador autônomo do SinergIA. Analise a pergunta do colaborador:\n"
+                    "- Se tratar de APENAS UM tema, chame a ferramenta específica (F1..F5) correspondente.\n"
+                    "- Se abordar DOIS OU MAIS temas/bases diferentes (ex: saúde ocupacional e EPIs, "
+                    "pausas e CLT), chame `ferramenta_busca_multiplas_bases` (ou as ferramentas em paralelo) "
+                    "incluindo APENAS as bases relacionadas, com uma query específica e um peso (0.1 a 1.0) "
+                    "proporcional ao foco de cada tema na pergunta."
                 ),
             },
             {"role": "user", "content": pergunta},
@@ -382,8 +666,11 @@ class _BasePitchLLMService:
             {
                 "role": "system",
                 "content": (
-                    "Escolha qual base de conhecimento (1 a 5) responde melhor à pergunta. "
-                    "Responda APENAS JSON válido no formato {\"id_base\": <int 1..5>, \"query\": \"<string>\"}.\n"
+                    "Escolha qual ou quais bases de conhecimento (1 a 5) respondem melhor à pergunta. "
+                    "Inclua APENAS as bases diretamente relacionadas à pergunta.\n"
+                    "Responda APENAS JSON válido no formato "
+                    "{\"consultas\": [{\"id_base\": <int 1..5>, \"query\": \"<string>\", \"peso\": <float 0.1..1.0>}]}.\n"
+                    "Atribua um peso maior à base que representa o foco principal da pergunta.\n"
                     f"Bases disponíveis:\n{bases_desc}"
                 ),
             },
@@ -705,6 +992,7 @@ class GroqPitchService(_BasePitchLLMService):
             "messages": self._mensagens_roteamento_tool(pergunta),
             "tools": _construir_definicoes_tools(),
             "tool_choice": "auto",
+            "parallel_tool_calls": True,
         }
         resp = httpx.post(
             f"{self.base_url}/chat/completions",
@@ -853,10 +1141,11 @@ class GroqPitchService(_BasePitchLLMService):
             detalhe_erro = str(erro)
             if isinstance(erro, httpx.HTTPStatusError):
                 try:
+                    erro.response.read()
                     msg_api = erro.response.json().get("error", {}).get("message")
                     if msg_api:
                         detalhe_erro = f"{detalhe_erro} — {msg_api}"
-                except (ValueError, KeyError, TypeError, AttributeError) as parse_err:
+                except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as parse_err:
                     logger.debug("Sem detalhes JSON na resposta Groq: %s", parse_err)
             resumo_trechos = (
                 f"Base consultada retornou {len(contexto.trechos)} trecho(s) relevante(s): "

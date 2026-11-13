@@ -11,7 +11,9 @@ import streamlit as st
 from sinergia.rag.chunking import chunking_documento_pdf
 from sinergia.rag.ingestao import MAPA_MOCKS_PADRAO, mapear_mock_para_metadados
 from sinergia.rag.interfaces import (
+    ContextoRAG,
     DetalheScoreTrecho,
+    EstatisticasEmbedding,
     MetadadosTrecho,
     TrechoRecuperado,
 )
@@ -32,7 +34,7 @@ from sinergia.rag.pitch.telemetry import (
 )
 from sinergia.rag.pitch.theme import (
     aplicar_tema_monocromatico,
-    renderizar_badge_base,
+    renderizar_badges_roteamento,
     renderizar_barra_distribuicao,
     renderizar_card_kpi,
     renderizar_citacoes_html,
@@ -189,38 +191,61 @@ def executar_turno_rag(
     ao_receber_reasoning: Callable[[str], None] | None = None,
     ao_receber_conteudo: Callable[[str], None] | None = None,
 ) -> TelemetriaTurno:
-    """Executa roteamento autônomo, busca híbrida instrumentada e geração na LLM ativa."""
+    """Executa roteamento autônomo ponderado, busca híbrida multi-base e geração na LLM ativa."""
     if ao_avancar_etapa:
         ao_avancar_etapa("Roteando pergunta autonomamente entre as bases F1..F5...")
     decisao = servico_llm.decidir_base_autonomamente(pergunta, modelo=modelo_selecionado)
 
-    if ao_avancar_etapa:
-        ao_avancar_etapa(
-            f"Buscando trechos na base **{decisao.codigo_base}** ({decisao.nome_base})..."
+    chamadas = decisao.chamadas
+    trechos_mesclados: list[TrechoRecuperado] = []
+    detalhes_mesclados: list[DetalheScoreTrecho] = []
+    embed_ms_total = 0.0
+    db_rrf_ms_total = 0.0
+    estatisticas_primarias: EstatisticasEmbedding | None = None
+
+    for chamada in chamadas:
+        if ao_avancar_etapa:
+            if len(chamadas) == 1:
+                ao_avancar_etapa(
+                    f"Buscando trechos na base **{chamada.codigo_base}** ({chamada.nome_base})..."
+                )
+            else:
+                ao_avancar_etapa(
+                    f"Buscando {chamada.limite_trechos} trecho(s) na base **{chamada.codigo_base}** "
+                    f"({chamada.nome_base} · peso {chamada.peso * 100:.0f}%)..."
+                )
+        resultado_rag = buscador.buscar_com_telemetria(
+            query=chamada.query_busca,
+            id_base=chamada.id_base,
+            limite=chamada.limite_trechos,
         )
-    resultado_rag = buscador.buscar_com_telemetria(
+        trechos_mesclados.extend(resultado_rag.contexto.trechos)
+        detalhes_mesclados.extend(resultado_rag.detalhes_trechos)
+        embed_ms_total += resultado_rag.embed_ms
+        db_rrf_ms_total += resultado_rag.db_rrf_ms
+        if estatisticas_primarias is None:
+            estatisticas_primarias = resultado_rag.estatisticas_embedding
+
+    contexto_final = ContextoRAG(
         query=decisao.query_busca,
         id_base=decisao.id_base,
-        limite=4,
+        trechos=trechos_mesclados,
+        total_encontrado=len(trechos_mesclados),
     )
+    estatisticas_finais = estatisticas_primarias or EstatisticasEmbedding()
 
     if ao_avancar_etapa:
         modelo_label = modelo_selecionado or "LLM ativa"
         ao_avancar_etapa(f"Gerando resposta fundamentada com `{modelo_label}`...")
     resposta_llm = servico_llm.gerar_resposta_fundamentada(
         pergunta=pergunta,
-        contexto=resultado_rag.contexto,
+        contexto=contexto_final,
         modelo=modelo_selecionado,
         ao_receber_reasoning=ao_receber_reasoning,
         ao_receber_conteudo=ao_receber_conteudo,
     )
 
-    total_ms = (
-        decisao.roteamento_ms
-        + resultado_rag.embed_ms
-        + resultado_rag.db_rrf_ms
-        + resposta_llm.llm_ms
-    )
+    total_ms = decisao.roteamento_ms + embed_ms_total + db_rrf_ms_total + resposta_llm.llm_ms
     id_turno = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
 
@@ -234,12 +259,12 @@ def executar_turno_rag(
         tempos=TemposTurno(
             total_ms=round(total_ms, 2),
             roteamento_ms=decisao.roteamento_ms,
-            embed_ms=resultado_rag.embed_ms,
-            db_rrf_ms=resultado_rag.db_rrf_ms,
+            embed_ms=round(embed_ms_total, 2),
+            db_rrf_ms=round(db_rrf_ms_total, 2),
             llm_ms=resposta_llm.llm_ms,
         ),
-        estatisticas_embedding=resultado_rag.estatisticas_embedding,
-        detalhes_trechos=resultado_rag.detalhes_trechos,
+        estatisticas_embedding=estatisticas_finais,
+        detalhes_trechos=detalhes_mesclados,
         metricas_ollama=resposta_llm.metricas,
         prompt_enviado=resposta_llm.prompt_enviado,
     )
@@ -401,7 +426,7 @@ def _renderizar_visao_global(turnos: list[TelemetriaTurno]) -> None:
         for turno in reversed(turnos):
             rot = turno.roteamento
             tempo_s = turno.tempos.total_ms / 1000.0
-            rotulo = f"[{rot.codigo_base}] {turno.pergunta[:55]} · {tempo_s:.2f}s"
+            rotulo = f"[{rot.codigos_combinados}] {turno.pergunta[:55]} · {tempo_s:.2f}s"
             st.button(
                 rotulo,
                 key=f"history_btn_{turno.id_turno}",
@@ -424,9 +449,8 @@ def _renderizar_raio_x(turno: TelemetriaTurno) -> None:
         )
     with topo_dir:
         st.html(
-            renderizar_badge_base(
-                turno.roteamento.codigo_base,
-                turno.roteamento.nome_base,
+            renderizar_badges_roteamento(
+                turno.roteamento,
                 ativo=True,
             )
         )
@@ -449,8 +473,9 @@ def _renderizar_raio_x(turno: TelemetriaTurno) -> None:
                 meta = det.metadados
                 h_info, h_pdf = st.columns([3, 1], vertical_alignment="center")
                 with h_info:
+                    prefixo_base = f"[F{meta.id_base}] " if meta.id_base else ""
                     st.markdown(
-                        f"**#{idx} · {meta.titulo}** ({meta.secao or 'Geral'}) — `RRF: {det.rrf_score:.4f}`"
+                        f"**#{idx} · {prefixo_base}{meta.titulo}** ({meta.secao or 'Geral'}) — `RRF: {det.rrf_score:.4f}`"
                     )
                     if meta.breadcrumb:
                         st.caption(meta.breadcrumb)
@@ -520,12 +545,22 @@ def _renderizar_raio_x(turno: TelemetriaTurno) -> None:
     with aba_tool:
         ol = turno.metricas_ollama
         with st.container(border=True):
-            st.markdown("**Tool escolhida & métricas de geração**")
-            st.code(
-                f"{turno.roteamento.tool_name}(query={turno.roteamento.query_busca!r}) "
-                f"# modo={turno.roteamento.modo_roteamento} | modelo={ol.modelo}",
-                language="python",
-            )
+            st.markdown("**Tool(s) escolhida(s) & métricas de geração**")
+            if len(turno.roteamento.chamadas) > 1:
+                linhas_tools = [
+                    f"{c.tool_name}(query={c.query_busca!r}, peso={c.peso:.2f}) -> {c.limite_trechos} trechos [{c.codigo_base}]"
+                    for c in turno.roteamento.chamadas
+                ]
+                linhas_tools.append(
+                    f"# modo={turno.roteamento.modo_roteamento} | modelo={ol.modelo}"
+                )
+                codigo_tools = "\n".join(linhas_tools)
+            else:
+                codigo_tools = (
+                    f"{turno.roteamento.tool_name}(query={turno.roteamento.query_busca!r}) "
+                    f"# modo={turno.roteamento.modo_roteamento} | modelo={ol.modelo}"
+                )
+            st.code(codigo_tools, language="python")
             m1, m2 = st.columns(2)
             m1.html(renderizar_card_kpi("prompt_tokens", str(ol.prompt_eval_count)))
             m2.html(renderizar_card_kpi("eval_tokens", str(ol.eval_count)))
@@ -653,9 +688,8 @@ with col_chat:
                     c_badge, c_btn = st.columns([3, 1], vertical_alignment="center")
                     with c_badge:
                         st.html(
-                            renderizar_badge_base(
-                                turno.roteamento.codigo_base,
-                                turno.roteamento.nome_base,
+                            renderizar_badges_roteamento(
+                                turno.roteamento,
                                 ativo=is_selected,
                             )
                         )

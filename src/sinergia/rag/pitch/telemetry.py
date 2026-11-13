@@ -77,17 +77,28 @@ def calcular_visao_global(turnos: list[TelemetriaTurno]) -> MetricasVisaoGlobal:
     contagens_por_base = {id_base: 0 for id_base in MAPA_BASES_FERRAMENTAS}
 
     for turno in turnos:
-        id_b = turno.roteamento.id_base
-        if id_b in contagens_por_base:
-            contagens_por_base[id_b] += 1
+        chamadas = getattr(turno.roteamento, "chamadas", None)
+        if chamadas:
+            for chamada in chamadas:
+                if chamada.id_base in contagens_por_base:
+                    contagens_por_base[chamada.id_base] += 1
+        else:
+            id_b = turno.roteamento.id_base
+            if id_b in contagens_por_base:
+                contagens_por_base[id_b] += 1
 
+    total_acionamentos = sum(contagens_por_base.values())
     distribuicao = [
         DistribuicaoBase(
             id_base=id_base,
             codigo=info["codigo"],
             nome=info["nome"],
             contagem=contagens_por_base[id_base],
-            percentual=round((contagens_por_base[id_base] / total) * 100.0, 1) if total else 0.0,
+            percentual=(
+                round((contagens_por_base[id_base] / total_acionamentos) * 100.0, 1)
+                if total_acionamentos
+                else 0.0
+            ),
         )
         for id_base, info in sorted(MAPA_BASES_FERRAMENTAS.items())
     ]

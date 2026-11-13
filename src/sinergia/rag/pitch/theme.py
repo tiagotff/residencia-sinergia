@@ -63,6 +63,13 @@ def obter_css_monocromatico_light() -> str:
     margin: 0.25rem 0 0 0;
   }}
 
+  .sinergia-badges-wrap {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+  }}
+
   .sinergia-badge-base {{
     display: inline-flex;
     align-items: center;
@@ -231,11 +238,37 @@ def aplicar_tema_monocromatico() -> None:
     st.html(obter_css_monocromatico_light())
 
 
-def renderizar_badge_base(codigo: str, nome: str, ativo: bool = False) -> str:
+def renderizar_badge_base(
+    codigo: str, nome: str, ativo: bool = False, sufixo: str = ""
+) -> str:
     """Gera o HTML do indicativo visual (badge) da base consultada (F1..F5)."""
     classe = "sinergia-badge-base sinergia-badge-base--ativa" if ativo else "sinergia-badge-base"
     texto = f"Base {html.escape(codigo)} · {html.escape(nome)}"
+    if sufixo:
+        texto = f"{texto} ({html.escape(sufixo)})"
     return f'<span class="{classe}">{texto}</span>'
+
+
+def renderizar_badges_roteamento(roteamento: object, ativo: bool = False) -> str:
+    """Renderiza um ou múltiplos badges com peso proporcional para as bases acionadas."""
+    chamadas = getattr(roteamento, "chamadas", None) or []
+    if len(chamadas) <= 1:
+        return renderizar_badge_base(
+            getattr(roteamento, "codigo_base", "F1"),
+            getattr(roteamento, "nome_base", ""),
+            ativo=ativo,
+        )
+
+    badges = "".join(
+        renderizar_badge_base(
+            c.codigo_base,
+            c.nome_base,
+            ativo=ativo,
+            sufixo=f"{round(c.peso * 100):.0f}% · {c.limite_trechos} trechos",
+        )
+        for c in chamadas
+    )
+    return f'<div class="sinergia-badges-wrap">{badges}</div>'
 
 
 def renderizar_card_kpi(titulo: str, valor: str, subtitulo: str = "") -> str:
