@@ -19,3 +19,8 @@ Thumbs.db
 mlruns/
 data/rag/**/*.pdf
 !data/rag/.gitkeep
+
+# Docker
+.docker/
+docker-data/
+data/db/
