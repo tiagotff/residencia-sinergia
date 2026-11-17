@@ -1,0 +1,38 @@
+{
+  "protocolo": "sinergia/1",
+  "id_mensagem": "r-108-03",
+  "tipo": "RESULTADO",
+  "acao": "a1.confirmar",
+  "origem": "A1",
+  "destino": "A0",
+  "em_resposta_a": "t-108-03",
+  "correlacao": {
+    "id_caso": 108,
+    "thread_id": "chat-42-108",
+    "id_tarefa": "t-108-03"
+  },
+  "status": "OK",
+  "estado_proposto": "NOVO",
+  "payload": {
+    "motivo": "data de fim anterior à de início"
+  },
+  "saidas": [
+    {
+      "tipo": "mensagem",
+      "texto": "Acho que há um erro nas datas do atestado. Pode me confirmar de quando até quando é o afastamento?"
+    }
+  ],
+  "eventos": [
+    {
+      "tipo": "atestado.invalido",
+      "dados": {
+        "id_caso": 108,
+        "motivo": "fim < inicio"
+      }
+    }
+  ],
+  "decisao": {
+    "motivo": "regra de datas falhou",
+    "usou_llm": false
+  }
+}
