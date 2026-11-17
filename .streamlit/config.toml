@@ -1,0 +1,33 @@
+# Tema Monocromático Claro (inspirado no template oficial shadcn.toml do Streamlit)
+
+[theme]
+base = "light"
+primaryColor = "#18181B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#FAFAFA"
+codeBackgroundColor = "#F4F4F5"
+textColor = "#09090B"
+linkColor = "#18181B"
+borderColor = "#E4E4E7"
+grayColor = "#71717A"
+showWidgetBorder = true
+showSidebarBorder = false
+baseRadius = "8px"
+buttonRadius = "8px"
+font = "'Inter':https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap"
+codeFontSize = "0.85rem"
+codeTextColor = "#18181B"
+baseFontSize = 14
+baseFontWeight = 400
+paddingTop = "1.5rem"
+paddingBottom = "2rem"
+chartCategoricalColors = ["#18181B", "#52525B", "#71717A", "#A1A1AA", "#D4D4D8"]
+
+[theme.sidebar]
+backgroundColor = "#FAFAFA"
+secondaryBackgroundColor = "#F4F4F5"
+codeBackgroundColor = "#E4E4E7"
+textColor = "#09090B"
+borderColor = "#E4E4E7"
+primaryColor = "#18181B"

@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SinergIA - RAG Demo</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+</head>
+<body class="bg-[var(--background)] text-[var(--foreground)] antialiased min-h-screen">
+  <div class="flex flex-col min-h-screen">
+
+    <!-- HEADER LIMPO -->
+    <header class="px-6 py-3.5 border-b border-[var(--border)] bg-[var(--content)] flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 class="text-base font-semibold text-[var(--foreground)]">SinergIA - RAG Demo</h1>
+        <p class="text-xs text-[var(--muted-foreground)]">A LLM decide autonomamente qual base consultar. Clique em qualquer resposta para abrir o Raio-X técnico.</p>
+      </div>
+      <!-- Perguntas Rápidas de Pitch no Header -->
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-xs text-[var(--muted-foreground)]">Testar pergunta:</span>
+        <button onclick="triggerScenario('nr17')" class="text-xs px-2.5 py-1.5 rounded-md bg-[var(--card)] hover:bg-[var(--accent)] border border-[var(--border)] transition">
+          Pausa digitação (NR-17)
+        </button>
+        <button onclick="triggerScenario('epi')" class="text-xs px-2.5 py-1.5 rounded-md bg-[var(--card)] hover:bg-[var(--accent)] border border-[var(--border)] transition">
+          Código CA 12345 (NR-6)
+        </button>
+        <button onclick="triggerScenario('clt')" class="text-xs px-2.5 py-1.5 rounded-md bg-[var(--card)] hover:bg-[var(--accent)] border border-[var(--border)] transition">
+          Falta casamento (CLT)
+        </button>
+      </div>
+    </header>
+
+    <!-- MAIN GRID: CHAT (ESQUERDA) + TELEMETRIA/RAIO-X (DIREITA) -->
+    <div class="flex-1 grid grid-cols-1 xl:grid-cols-12 min-h-0">
+
+      <!-- COLUNA ESQUERDA: CHAT (7 cols) -->
+      <section class="xl:col-span-7 flex flex-col border-b xl:border-b-0 xl:border-r border-[var(--border)] bg-[var(--background)]">
+        <div id="chatMessages" class="flex-1 p-5 space-y-4 overflow-y-auto max-h-[65vh] xl:max-h-[calc(100vh-130px)]">
+          <!-- Mensagens renderizadas via JS -->
+        </div>
+
+        <!-- Input Bar -->
+        <form id="chatForm" class="p-4 border-t border-[var(--border)] bg-[var(--content)] flex gap-2">
+          <input
+            id="chatInput"
+            type="text"
+            placeholder="Faça uma pergunta ao colaborador..."
+            class="flex-1 text-sm px-3.5 py-2.5 rounded-lg bg-[var(--card)] border border-[var(--border)] text-[var(--foreground)] placeholder-[var(--placeholder)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+          />
+          <button type="submit" class="px-4 py-2.5 rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] text-sm font-medium hover:opacity-90 transition">
+            Enviar
+          </button>
+        </form>
+      </section>
+
+      <!-- COLUNA DIREITA: PAINEL GLOBAL OU RAIO-X DA RESPOSTA (5 cols) -->
+      <section id="rightPanel" class="xl:col-span-5 flex flex-col bg-[var(--content)]">
+        <!-- Renderizado dinamicamente via JS -->
+      </section>
+
+    </div>
+  </div>
+
+  <script>
+    const BASES_META = {
+      1: { code: "F1", name: "Pausas e Ergonomia (NR-17)", color: "bg-sky-500/15 text-sky-400 border-sky-500/30" },
+      2: { code: "F2", name: "Direitos e Benefícios (CLT)", color: "bg-violet-500/15 text-violet-400 border-violet-500/30" },
+      3: { code: "F3", name: "Procedimentos e Treinamentos (POPs)", color: "bg-amber-500/15 text-amber-400 border-amber-500/30" },
+      4: { code: "F4", name: "Saúde Ocupacional (PCMSO)", color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
+      5: { code: "F5", name: "EPIs e Fichas de CA (NR-6)", color: "bg-rose-500/15 text-rose-400 border-rose-500/30" }
+    };
+
+    const SCENARIOS = {
+      nr17: {
+        baseId: 1,
+        toolName: "ferramenta_busca_pausas",
+        query: "Qual deve ser a pausa para atividades de digitação contínua?",
+        answer: "De acordo com a **NR-17 (Versão 2024.1, Item 17.6.4, Página 4)**, nas atividades de entrada de dados deve haver, no mínimo, uma pausa de **10 minutos para cada 50 minutos trabalhados**, não deduzidos da jornada normal de trabalho.\n\nAlém disso, o retorno ao trabalho após qualquer afastamento igual ou superior a 15 dias exige aumento gradativo da exigência de produção (Item 17.6.5).",
+        citations: ["NR-17 Ergonomia (v2024.1) · Item 17.6.4 · Pág. 4", "NR-17 Ergonomia (v2024.1) · Item 17.6.3 · Pág. 4"],
+        timings: { totalMs: 1420, embedMs: 18.4, dbMs: 9.2, llmMs: 1392 },
+        ollama: {
+          promptTokens: 614,
+          evalTokens: 78,
+          tokPerSec: 65.4,
+          loadMs: 12
+        },
+        embeddingStats: {
+          model: "tardellirs/colibri-embed-ptbr",
+          dims: 768,
+          normL2: "1.0000",
+          min: "-0.1142",
+          max: "0.1289",
+          mean: "0.0014",
+          sample: [0.0231, -0.0412, 0.0894, -0.0156, 0.0042, 0.0671, -0.0523, 0.0318, -0.0199, 0.0445, 0.0112, -0.0734]
+        },
+        chunks: [
+          {
+            id_trecho: 42,
+            id_documento: 1,
+            id_base: 1,
+            titulo: "NR-17 Ergonomia",
+            versao: "2024.1",
+            fonte: "Portaria MTP nº 423 / MTE",
+            secao: "Item 17.6.4",
+            pagina: 4,
+            breadcrumb: "NR-17 Ergonomia > 17.6 Organização do Trabalho > Item 17.6.4",
+            rrf: 0.0328,
+            denseScore: 0.8412,
+            denseRank: 1,
+            lexScore: 0.4120,
+            lexRank: 1,
+            texto: "17.6.4. Nas atividades de processamento eletrônico de dados, deve-se observar o seguinte: a) o número máximo de toques reais exigidos pelo empregador não deve ser superior a 8.000 por hora trabalhada; b) o tempo efetivo de trabalho de entrada de dados não deve exceder o limite máximo de 5 horas; c) deve haver, no mínimo, uma pausa de 10 minutos para cada 50 minutos trabalhados, não deduzidos da jornada normal.",
+            extra: {
+              hierarquia: ["NR-17 Ergonomia", "17.6 Organização do Trabalho", "Item 17.6.4"],
+              page_start: 4,
+              page_end: 4,
+              bboxes: [[72.0, 310.4, 523.1, 412.8]]
+            }
+          },
+          {
+            id_trecho: 41,
+            id_documento: 1,
+            id_base: 1,
+            titulo: "NR-17 Ergonomia",
+            versao: "2024.1",
+            fonte: "Portaria MTP nº 423 / MTE",
+            secao: "Item 17.6.3",
+            pagina: 4,
+            breadcrumb: "NR-17 Ergonomia > 17.6 Organização do Trabalho > Item 17.6.3",
+            rrf: 0.0315,
+            denseScore: 0.7834,
+            denseRank: 2,
+            lexScore: 0.2890,
+            lexRank: 3,
+            texto: "17.6.3. Nas atividades que exijam sobrecarga muscular estática ou dinâmica do pescoço, ombros, dorso e membros superiores e inferiores, devem ser incluídas pausas para descanso e outras medidas que preservem a saúde do trabalhador.",
+            extra: {
+              hierarquia: ["NR-17 Ergonomia", "17.6 Organização do Trabalho", "Item 17.6.3"],
+              page_start: 4,
+              page_end: 4,
+              bboxes: [[72.0, 218.0, 523.1, 298.5]]
+            }
+          }
+        ]
+      },
+      epi: {
+        baseId: 5,
+        toolName: "ferramenta_busca_epis",
+        query: "Qual a validade e aplicação do EPI com CA 12345?",
+        answer: "Conforme o catálogo **Fichas Técnicas de EPIs e Catálogo de CA (Versão 2024, Ficha CA 12345, Página 7)**, o **CA 12345** refere-se à Luva de Segurança Nitrílica com proteção química e mecânica.\n\n- **Prazo de substituição recomendado**: Imediato após perfuração, rasgo ou contaminação química severa, ou a cada 30 dias em uso contínuo.",
+        citations: ["Fichas Técnicas de EPIs (v2024) · CA 12345 · Pág. 7"],
+        timings: { totalMs: 1180, embedMs: 16.9, dbMs: 7.8, llmMs: 1155 },
+        ollama: {
+          promptTokens: 520,
+          evalTokens: 64,
+          tokPerSec: 64.0,
+          loadMs: 8
+        },
+        embeddingStats: {
+          model: "tardellirs/colibri-embed-ptbr",
+          dims: 768,
+          normL2: "1.0000",
+          min: "-0.1055",
+          max: "0.1341",
+          mean: "-0.0008",
+          sample: [-0.0312, 0.0721, 0.0154, -0.0642, 0.0881, -0.0124, 0.0498, -0.0231, 0.0556, -0.0411, 0.0289, 0.0172]
+        },
+        chunks: [
+          {
+            id_trecho: 184,
+            id_documento: 5,
+            id_base: 5,
+            titulo: "Fichas Técnicas de EPIs e Catálogo de CA",
+            versao: "2024",
+            fonte: "NR-6 / SESMT - Segurança do Trabalho",
+            secao: "Ficha CA 12345",
+            pagina: 7,
+            breadcrumb: "Catálogo de EPIs > Proteção das Mãos > Ficha CA 12345",
+            rrf: 0.0320,
+            denseScore: 0.7120,
+            denseRank: 3,
+            lexScore: 0.9450,
+            lexRank: 1,
+            texto: "CA 12345 — Luva de Segurança em Borracha Nitrílica. Indicação: Manuseio de solventes, óleos e peças abrasivas. Validade do CA junto ao MTE: Vigente. Substituição obrigatória a cada 30 dias ou imediatamente em caso de rasgo/perfuração.",
+            extra: {
+              hierarquia: ["Catálogo de EPIs", "Proteção das Mãos", "Ficha CA 12345"],
+              page_start: 7,
+              page_end: 7,
+              bboxes: [[64.0, 140.2, 530.0, 232.0]]
+            }
+          }
+        ]
+      },
+      clt: {
+        baseId: 2,
+        toolName: "ferramenta_busca_direitos",
+        query: "Quantos dias de falta justificada tenho direito por casamento?",
+        answer: "Segundo a **CLT - Consolidação das Leis do Trabalho (Versão 2024.1, Art. 473, Inciso II, Página 19)**, o empregado poderá deixar de comparecer ao serviço sem prejuízo do salário por **até 3 (três) dias consecutivos**, em virtude de casamento.",
+        citations: ["CLT (v2024.1) · Art. 473, II · Pág. 19"],
+        timings: { totalMs: 980, embedMs: 17.1, dbMs: 8.4, llmMs: 954 },
+        ollama: {
+          promptTokens: 480,
+          evalTokens: 52,
+          tokPerSec: 63.0,
+          loadMs: 5
+        },
+        embeddingStats: {
+          model: "tardellirs/colibri-embed-ptbr",
+          dims: 768,
+          normL2: "1.0000",
+          min: "-0.1210",
+          max: "0.1194",
+          mean: "0.0021",
+          sample: [0.0512, 0.0198, -0.0623, 0.0341, -0.0288, 0.0714, 0.0091, -0.0442, 0.0619, -0.0175, 0.0382, -0.0501]
+        },
+        chunks: [
+          {
+            id_trecho: 95,
+            id_documento: 2,
+            id_base: 2,
+            titulo: "CLT - Consolidação das Leis do Trabalho",
+            versao: "2024.1",
+            fonte: "Decreto-Lei nº 5.452 / Presidência da República",
+            secao: "Art. 473",
+            pagina: 19,
+            breadcrumb: "CLT > Título IV > Capítulo IV > Art. 473",
+            rrf: 0.0328,
+            denseScore: 0.8690,
+            denseRank: 1,
+            lexScore: 0.5310,
+            lexRank: 1,
+            texto: "Art. 473 - O empregado poderá deixar de comparecer ao serviço sem prejuízo do salário: I - até 2 (dois) dias consecutivos, em caso de falecimento do cônjuge... II - até 3 (três) dias consecutivos, em virtude de casamento; III - por 5 (cinco) dias consecutivos, em caso de nascimento de filho...",
+            extra: {
+              hierarquia: ["CLT", "Título IV", "Capítulo IV", "Art. 473"],
+              page_start: 19,
+              page_end: 19,
+              bboxes: [[70.0, 412.0, 520.5, 510.2]]
+            }
+          }
+        ]
+      }
+    };
+
+    // Estado inicial já com 2 interações para mostrar médias globais reais logo ao abrir
+    let chatMessages = [
+      { id: 1, role: "user", text: SCENARIOS.nr17.query },
+      { id: 2, role: "assistant", data: SCENARIOS.nr17 },
+      { id: 3, role: "user", text: SCENARIOS.epi.query },
+      { id: 4, role: "assistant", data: SCENARIOS.epi }
+    ];
+
+    // null = Visão Global; number = ID da mensagem selecionada para Raio-X
+    let selectedMessageId = null;
+    let currentTab = "chunks";
+
+    function formatMarkdownSimple(text) {
+      return text
+        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+        .replace(/`(.*?)`/g, '<code class="px-1 py-0.5 rounded bg-[var(--sidebar)] font-mono text-xs">$1</code>')
+        .replace(/\n/g, "<br/>");
+    }
+
+    function renderChat() {
+      const container = document.getElementById("chatMessages");
+      container.innerHTML = chatMessages.map((msg) => {
+        if (msg.role === "user") {
+          return `
+            <div class="flex justify-end">
+              <div class="max-w-[82%] rounded-xl px-4 py-2.5 bg-[var(--primary)] text-[var(--primary-foreground)] text-sm shadow-sm">
+                ${msg.text}
+              </div>
+            </div>
+          `;
+        }
+
+        const d = msg.data;
+        const base = BASES_META[d.baseId];
+        const isSelected = selectedMessageId === msg.id;
+        const cites = (d.citations || []).map(c =>
+          `<span class="inline-block text-xs px-2 py-0.5 rounded bg-[var(--sidebar)] border border-[var(--border)] text-[var(--muted-foreground)]">${c}</span>`
+        ).join(" ");
+
+        return `
+          <div class="flex justify-start">
+            <div
+              onclick="selectMessage(${msg.id})"
+              role="button"
+              tabindex="0"
+              class="max-w-[90%] text-left rounded-xl p-4 bg-[var(--card)] border-2 cursor-pointer transition shadow-sm space-y-2.5 ${
+                isSelected
+                  ? "border-[var(--primary)] ring-2 ring-[var(--primary)]/20"
+                  : "border-[var(--border)] hover:border-[var(--muted-foreground)]"
+              }"
+            >
+              <!-- Cabeçalho da mensagem com indicativo visual da base consultada -->
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-semibold text-[var(--foreground)]">SinergIA</span>
+                  <span class="text-xs px-2 py-0.5 rounded-full border font-medium ${base.color}">
+                    Base ${base.code} · ${base.name}
+                  </span>
+                </div>
+                <span class="text-xs text-[var(--muted-foreground)] font-mono">
+                  ${(d.timings.totalMs / 1000).toFixed(2)}s · ${isSelected ? "Inspecionando" : "Clique para Raio-X"}
+                </span>
+              </div>
+
+              <div class="leading-relaxed text-sm text-[var(--foreground)]">${formatMarkdownSimple(d.answer)}</div>
+
+              ${cites ? `<div class="pt-2 border-t border-[var(--border)] flex flex-wrap gap-1.5">${cites}</div>` : ""}
+            </div>
+          </div>
+        `;
+      }).join("");
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function renderGlobalPanel() {
+      const assistantMsgs = chatMessages.filter(m => m.role === "assistant");
+      const count = assistantMsgs.length;
+
+      const avgTotal = count ? (assistantMsgs.reduce((s, m) => s + m.data.timings.totalMs, 0) / count) : 0;
+      const avgRag = count ? (assistantMsgs.reduce((s, m) => s + m.data.timings.embedMs + m.data.timings.dbMs, 0) / count) : 0;
+      const avgLlm = count ? (assistantMsgs.reduce((s, m) => s + m.data.timings.llmMs, 0) / count) : 0;
+      const avgTokSec = count ? (assistantMsgs.reduce((s, m) => s + m.data.ollama.tokPerSec, 0) / count) : 0;
+      const totalTokens = assistantMsgs.reduce((s, m) => s + m.data.ollama.evalTokens, 0);
+
+      // Contagem de uso por base
+      const baseCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+      assistantMsgs.forEach(m => { baseCounts[m.data.baseId] = (baseCounts[m.data.baseId] || 0) + 1; });
+
+      const baseBarsHtml = Object.entries(BASES_META).map(([id, info]) => {
+        const c = baseCounts[id] || 0;
+        const pct = count ? Math.round((c / count) * 100) : 0;
+        return `
+          <div class="space-y-1">
+            <div class="flex justify-between text-xs">
+              <span class="text-[var(--foreground)]">${info.code} · ${info.name}</span>
+              <span class="font-mono text-[var(--muted-foreground)]">${c} (${pct}%)</span>
+            </div>
+            <div class="w-full h-2 rounded-full bg-[var(--sidebar)] overflow-hidden">
+              <div class="h-full bg-[var(--primary)] rounded-full" style="width: ${pct}%"></div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      const historyRows = assistantMsgs.slice().reverse().map((m, idx) => {
+        const base = BASES_META[m.data.baseId];
+        return `
+          <button onclick="selectMessage(${m.id})" class="w-full text-left p-2.5 rounded-lg bg-[var(--card)] hover:bg-[var(--accent)] border border-[var(--border)] flex items-center justify-between gap-2 transition">
+            <div class="min-w-0">
+              <div class="text-xs font-medium text-[var(--foreground)] truncate">${m.data.query}</div>
+              <div class="text-xs text-[var(--muted-foreground)]">Base ${base.code} · ${m.data.chunks.length} chunks</div>
+            </div>
+            <span class="text-xs font-mono shrink-0 text-[var(--foreground)]">${(m.data.timings.totalMs / 1000).toFixed(2)}s</span>
+          </button>
+        `;
+      }).join("");
+
+      return `
+        <div class="p-4 border-b border-[var(--border)] flex items-center justify-between">
+          <div>
+            <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Visão Global da Sessão</div>
+            <div class="text-sm font-semibold text-[var(--foreground)] mt-0.5">Métricas Agregadas do Pipeline</div>
+          </div>
+          <span class="text-xs px-2.5 py-1 rounded-full bg-[var(--secondary)] text-[var(--secondary-foreground)] border border-[var(--border)] font-mono">
+            ${count} consultas
+          </span>
+        </div>
+
+        <div class="p-4 space-y-4 overflow-y-auto flex-1">
+          <!-- KPIs Globais -->
+          <div class="grid grid-cols-2 gap-2.5">
+            <div class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)]">
+              <div class="text-xs text-[var(--muted-foreground)]">Tempo Médio Total</div>
+              <div class="text-lg font-bold font-mono text-[var(--foreground)] mt-0.5">${(avgTotal / 1000).toFixed(2)} s</div>
+              <div class="text-xs text-[var(--muted-foreground)]">End-to-end por resposta</div>
+            </div>
+            <div class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)]">
+              <div class="text-xs text-[var(--muted-foreground)]">Latência Média RAG</div>
+              <div class="text-lg font-bold font-mono text-[var(--foreground)] mt-0.5">${avgRag.toFixed(1)} ms</div>
+              <div class="text-xs text-[var(--muted-foreground)]">Embedding + Busca Híbrida</div>
+            </div>
+            <div class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)]">
+              <div class="text-xs text-[var(--muted-foreground)]">Latência Média LLM</div>
+              <div class="text-lg font-bold font-mono text-[var(--foreground)] mt-0.5">${(avgLlm / 1000).toFixed(2)} s</div>
+              <div class="text-xs text-[var(--muted-foreground)]">${avgTokSec.toFixed(1)} tok/s em média</div>
+            </div>
+            <div class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)]">
+              <div class="text-xs text-[var(--muted-foreground)]">Tokens Gerados</div>
+              <div class="text-lg font-bold font-mono text-[var(--foreground)] mt-0.5">${totalTokens}</div>
+              <div class="text-xs text-[var(--muted-foreground)]">Total acumulado na sessão</div>
+            </div>
+          </div>
+
+          <!-- Distribuição de Roteamento Autônomo -->
+          <div class="p-3.5 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-3">
+            <div class="text-xs font-semibold text-[var(--foreground)]">Roteamento Autônomo por Base (Tool Calling)</div>
+            <div class="space-y-2.5">${baseBarsHtml}</div>
+          </div>
+
+          <!-- Últimas Consultas -->
+          <div class="space-y-2">
+            <div class="text-xs font-semibold text-[var(--muted-foreground)]">Clique em uma resposta no chat (ou abaixo) para detalhar:</div>
+            <div class="space-y-1.5">${historyRows}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function buildPromptString(sc) {
+      return sc.chunks.map((c, idx) =>
+        `--- [FONTE ${idx + 1}]: ${c.titulo} (Versão: ${c.versao}) ---\n` +
+        `- Trilha: ${c.breadcrumb}\n` +
+        `- Seção/Artigo: ${c.secao}\n` +
+        `- Página: ${c.pagina}\n` +
+        `- Fonte: ${c.fonte}\n` +
+        `- Score RRF: ${c.rrf.toFixed(4)}\n` +
+        `Conteúdo:\n${c.texto}`
+      ).join("\n\n");
+    }
+
+    function renderDetailTabBody(sc) {
+      if (currentTab === "chunks") {
+        return sc.chunks.map((c, idx) => `
+          <div class="p-3.5 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-2.5">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <div class="text-xs font-semibold text-[var(--foreground)]">#${idx + 1} · ${c.titulo} (${c.secao})</div>
+                <div class="text-xs text-[var(--muted-foreground)]">${c.breadcrumb}</div>
+              </div>
+              <span class="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-[var(--secondary)] text-[var(--secondary-foreground)]">
+                RRF: ${c.rrf.toFixed(4)}
+              </span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <div class="p-2 rounded bg-[var(--sidebar)] border border-[var(--border)]">
+                <div class="text-[var(--muted-foreground)]">Denso (Cosseno)</div>
+                <div class="font-mono font-semibold text-[var(--foreground)]">${c.denseScore.toFixed(4)} <span class="text-[var(--muted-foreground)]">(#${c.denseRank})</span></div>
+              </div>
+              <div class="p-2 rounded bg-[var(--sidebar)] border border-[var(--border)]">
+                <div class="text-[var(--muted-foreground)]">Léxico (ts_rank)</div>
+                <div class="font-mono font-semibold text-[var(--foreground)]">${c.lexScore.toFixed(4)} <span class="text-[var(--muted-foreground)]">(#${c.lexRank})</span></div>
+              </div>
+            </div>
+            <p class="text-xs leading-relaxed text-[var(--foreground)] bg-[var(--background)] p-2.5 rounded border border-[var(--border)]">
+              ${c.texto}
+            </p>
+          </div>
+        `).join("");
+      }
+
+      if (currentTab === "embedding") {
+        const emb = sc.embeddingStats;
+        const barsHtml = emb.sample.map((val, i) => {
+          const pct = Math.min(100, Math.max(12, Math.abs(val) * 900));
+          const color = val >= 0 ? "bg-[var(--primary)]" : "bg-amber-500";
+          return `
+            <div class="flex flex-col items-center gap-1 flex-1">
+              <div class="w-full h-16 flex items-end bg-[var(--sidebar)] rounded overflow-hidden">
+                <div class="w-full ${color}" style="height: ${pct}%"></div>
+              </div>
+              <span class="text-xs font-mono text-[var(--muted-foreground)]">${i}</span>
+            </div>
+          `;
+        }).join("");
+
+        return `
+          <div class="p-3.5 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-3">
+            <div class="text-xs font-semibold text-[var(--foreground)]">Vetor da Consulta (Query Embedding)</div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <div class="p-2 rounded bg-[var(--sidebar)] border border-[var(--border)]">
+                <span class="text-[var(--muted-foreground)]">Modelo:</span>
+                <div class="font-mono text-[var(--foreground)] truncate">${emb.model}</div>
+              </div>
+              <div class="p-2 rounded bg-[var(--sidebar)] border border-[var(--border)]">
+                <span class="text-[var(--muted-foreground)]">Dimensões / Norma L2:</span>
+                <div class="font-mono text-[var(--foreground)]">${emb.dims}d · ||v|| = ${emb.normL2}</div>
+              </div>
+            </div>
+            <div class="grid grid-cols-3 gap-2 text-xs font-mono">
+              <div class="p-2 rounded bg-[var(--sidebar)] border border-[var(--border)]">min: ${emb.min}</div>
+              <div class="p-2 rounded bg-[var(--sidebar)] border border-[var(--border)]">max: ${emb.max}</div>
+              <div class="p-2 rounded bg-[var(--sidebar)] border border-[var(--border)]">mean: ${emb.mean}</div>
+            </div>
+            <div>
+              <div class="text-xs text-[var(--muted-foreground)] mb-1.5">Primeiras 12 dimensões:</div>
+              <div class="flex gap-1.5 items-end">${barsHtml}</div>
+            </div>
+            <pre class="text-xs font-mono p-2.5 rounded bg-[var(--background)] border border-[var(--border)] overflow-x-auto">[${emb.sample.join(", ")}, ... (+756 floats)]</pre>
+          </div>
+        `;
+      }
+
+      if (currentTab === "metadata") {
+        return sc.chunks.map((c, idx) => `
+          <div class="p-3.5 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-2">
+            <div class="text-xs font-semibold text-[var(--foreground)]">Chunk #${idx + 1} · Linhagem</div>
+            <div class="grid grid-cols-2 gap-1.5 text-xs font-mono">
+              <div>id_trecho: <span class="text-[var(--foreground)]">${c.id_trecho}</span></div>
+              <div>id_documento: <span class="text-[var(--foreground)]">${c.id_documento}</span></div>
+              <div>id_base: <span class="text-[var(--foreground)]">${c.id_base}</span></div>
+              <div>versao: <span class="text-[var(--foreground)]">${c.versao}</span></div>
+              <div>pagina: <span class="text-[var(--foreground)]">${c.pagina}</span></div>
+              <div>vigente: <span class="text-emerald-500">true</span></div>
+            </div>
+            <pre class="text-xs font-mono p-2.5 rounded bg-[var(--background)] border border-[var(--border)] overflow-x-auto">${JSON.stringify(c.extra, null, 2)}</pre>
+          </div>
+        `).join("");
+      }
+
+      const ol = sc.ollama;
+      return `
+        <div class="p-3.5 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-3">
+          <div class="text-xs font-semibold text-[var(--foreground)]">Tool Escolhida & Métricas de Geração</div>
+          <div class="p-2 rounded bg-[var(--sidebar)] border border-[var(--border)] text-xs font-mono">
+            tool_call: <span class="text-[var(--foreground)] font-semibold">${sc.toolName}(query="${sc.query}")</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-xs font-mono">
+            <div class="p-2 rounded bg-[var(--sidebar)] border border-[var(--border)]">prompt_tokens: ${ol.promptTokens}</div>
+            <div class="p-2 rounded bg-[var(--sidebar)] border border-[var(--border)]">eval_tokens: ${ol.evalTokens}</div>
+            <div class="p-2 rounded bg-[var(--sidebar)] border border-[var(--border)]">velocidade: ${ol.tokPerSec} tok/s</div>
+            <div class="p-2 rounded bg-[var(--sidebar)] border border-[var(--border)]">load_duration: ${ol.loadMs} ms</div>
+          </div>
+          <pre class="text-xs font-mono p-2.5 rounded bg-[var(--background)] border border-[var(--border)] whitespace-pre-wrap leading-relaxed">${buildPromptString(sc)}</pre>
+        </div>
+      `;
+    }
+
+    function renderDetailPanel(msg) {
+      const sc = msg.data;
+      const base = BASES_META[sc.baseId];
+
+      const tabs = [
+        { id: "chunks", label: "1. Chunks & RRF" },
+        { id: "embedding", label: "2. Embedding (768d)" },
+        { id: "metadata", label: "3. Metadados" },
+        { id: "prompt", label: "4. Tool & Prompt" }
+      ];
+
+      const tabsHtml = tabs.map(t => {
+        const active = currentTab === t.id;
+        return `
+          <button onclick="switchTab('${t.id}')" class="px-3 py-2 text-xs font-medium rounded-t-md border-b-2 transition ${
+            active
+              ? "border-[var(--primary)] text-[var(--foreground)] bg-[var(--content)]"
+              : "border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+          }">${t.label}</button>
+        `;
+      }).join("");
+
+      return `
+        <div class="p-4 border-b border-[var(--border)] space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <button onclick="clearSelection()" class="text-xs px-2.5 py-1 rounded-md bg-[var(--card)] hover:bg-[var(--accent)] border border-[var(--border)] text-[var(--foreground)] font-medium">
+              <- Voltar para Visão Global
+            </button>
+            <span class="text-xs px-2.5 py-0.5 rounded-full border font-medium ${base.color}">
+              ${base.code} · ${base.name}
+            </span>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div class="p-2.5 rounded-lg bg-[var(--card)] border border-[var(--border)]">
+              <div class="text-xs text-[var(--muted-foreground)]">Total</div>
+              <div class="text-base font-bold font-mono text-[var(--foreground)]">${(sc.timings.totalMs / 1000).toFixed(2)} s</div>
+            </div>
+            <div class="p-2.5 rounded-lg bg-[var(--card)] border border-[var(--border)]">
+              <div class="text-xs text-[var(--muted-foreground)]">Embedding</div>
+              <div class="text-base font-bold font-mono text-[var(--foreground)]">${sc.timings.embedMs} ms</div>
+            </div>
+            <div class="p-2.5 rounded-lg bg-[var(--card)] border border-[var(--border)]">
+              <div class="text-xs text-[var(--muted-foreground)]">DB + RRF</div>
+              <div class="text-base font-bold font-mono text-[var(--foreground)]">${sc.timings.dbMs} ms</div>
+            </div>
+            <div class="p-2.5 rounded-lg bg-[var(--card)] border border-[var(--border)]">
+              <div class="text-xs text-[var(--muted-foreground)]">LLM</div>
+              <div class="text-base font-bold font-mono text-[var(--foreground)]">${(sc.timings.llmMs / 1000).toFixed(2)} s</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex border-b border-[var(--border)] bg-[var(--sidebar)] px-2 pt-2 gap-1 overflow-x-auto">
+          ${tabsHtml}
+        </div>
+
+        <div class="flex-1 p-4 overflow-y-auto max-h-[60vh] xl:max-h-[calc(100vh-300px)] space-y-3">
+          ${renderDetailTabBody(sc)}
+        </div>
+      `;
+    }
+
+    function renderRightPanel() {
+      const panel = document.getElementById("rightPanel");
+      if (selectedMessageId === null) {
+        panel.innerHTML = renderGlobalPanel();
+      } else {
+        const msg = chatMessages.find(m => m.id === selectedMessageId);
+        panel.innerHTML = msg ? renderDetailPanel(msg) : renderGlobalPanel();
+      }
+    }
+
+    function selectMessage(id) {
+      selectedMessageId = (selectedMessageId === id) ? null : id;
+      renderChat();
+      renderRightPanel();
+    }
+
+    function clearSelection() {
+      selectedMessageId = null;
+      renderChat();
+      renderRightPanel();
+    }
+
+    function switchTab(tabId) {
+      currentTab = tabId;
+      renderRightPanel();
+    }
+
+    function triggerScenario(key, customText = null) {
+      const sc = SCENARIOS[key];
+      const nextId = chatMessages.length + 1;
+      const clonedData = { ...sc, query: customText || sc.query };
+      chatMessages.push({ id: nextId, role: "user", text: clonedData.query });
+      chatMessages.push({ id: nextId + 1, role: "assistant", data: clonedData });
+      // Mantém na visão global para mostrar as médias atualizando em tempo real
+      selectedMessageId = null;
+      renderChat();
+      renderRightPanel();
+    }
+
+    document.getElementById("chatForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const input = document.getElementById("chatInput");
+      const val = input.value.trim();
+      if (!val) return;
+      const lower = val.toLowerCase();
+      let key = "nr17";
+      if (lower.includes("ca") || lower.includes("epi") || lower.includes("luva")) key = "epi";
+      else if (lower.includes("casamento") || lower.includes("clt") || lower.includes("falta") || lower.includes("473")) key = "clt";
+      input.value = "";
+      triggerScenario(key, val);
+    });
+
+    renderChat();
+    renderRightPanel();
+  </script>
+</body>
+</html>
