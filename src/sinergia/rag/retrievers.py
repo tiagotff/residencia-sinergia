@@ -257,6 +257,11 @@ class BuscadorHibrido:
                     densos = []
                     for row in linhas_densas:
                         meta_json = row[10] if len(row) > 10 and isinstance(row[10], dict) else {}
+                        secao_extraida = (
+                            meta_json.get("secao")
+                            or (meta_json.get("hierarquia", [None])[-1] if meta_json.get("hierarquia") else None)
+                            or meta_json.get("secoes_map", {}).get("h1")
+                        )
                         meta = MetadadosTrecho(
                             id_documento=row[3],
                             titulo=row[4],
@@ -266,7 +271,7 @@ class BuscadorHibrido:
                             ordem=row[2],
                             vigente=row[8],
                             breadcrumb=meta_json.get("breadcrumb"),
-                            secao=meta_json.get("secoes_map", {}).get("h1") or meta_json.get("hierarquia", [None])[-1] if meta_json.get("hierarquia") else None,
+                            secao=secao_extraida,
                             pagina=meta_json.get("page_start"),
                             extra=meta_json,
                         )
@@ -307,6 +312,11 @@ class BuscadorHibrido:
                     lexicos = []
                     for row in linhas_lexicas:
                         meta_json = row[10] if len(row) > 10 and isinstance(row[10], dict) else {}
+                        secao_extraida = (
+                            meta_json.get("secao")
+                            or (meta_json.get("hierarquia", [None])[-1] if meta_json.get("hierarquia") else None)
+                            or meta_json.get("secoes_map", {}).get("h1")
+                        )
                         meta = MetadadosTrecho(
                             id_documento=row[3],
                             titulo=row[4],
@@ -316,7 +326,7 @@ class BuscadorHibrido:
                             ordem=row[2],
                             vigente=row[8],
                             breadcrumb=meta_json.get("breadcrumb"),
-                            secao=meta_json.get("secoes_map", {}).get("h1") or meta_json.get("hierarquia", [None])[-1] if meta_json.get("hierarquia") else None,
+                            secao=secao_extraida,
                             pagina=meta_json.get("page_start"),
                             extra=meta_json,
                         )

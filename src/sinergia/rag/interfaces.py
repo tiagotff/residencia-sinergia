@@ -4,6 +4,36 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+class MetadadosCabecalhoKB(BaseModel):
+    """Metadados estruturados extraídos da tabela de governança (página 1) dos PDFs da Base de Conhecimento."""
+
+    titulo: str = Field(default="", description="Título oficial da base de conhecimento")
+    codigo: Optional[str] = Field(
+        default=None, description="Código identificador do documento (ex: KB-RH-ERG-001)"
+    )
+    versao: str = Field(default="1.0", description="Versão do documento")
+    vigencia: Optional[str] = Field(default=None, description="Data de início de vigência")
+    tipo_fonte: Optional[str] = Field(
+        default=None, description="Tipo de fonte (ex: INTERNO, OFICIAL)"
+    )
+    fonte: str = Field(default="", description="Fontes normativas e áreas responsáveis")
+    base_rag: Optional[str] = Field(
+        default=None, description="Identificação da Base RAG e funcionalidades associadas"
+    )
+    responsavel: Optional[str] = Field(
+        default=None, description="Equipe responsável pela manutenção da base"
+    )
+    aprovacao: Optional[str] = Field(
+        default=None, description="Status e responsável pela aprovação"
+    )
+    revisao: Optional[str] = Field(
+        default=None, description="Datas de revisão atual e próxima"
+    )
+    convencoes: Optional[str] = Field(
+        default=None, description="Convenções de estrutura e precedência do documento"
+    )
+
+
 class MetadadosTrecho(BaseModel):
     """Metadados de procedência, versionamento e localização de um trecho documental."""
 
@@ -20,13 +50,9 @@ class MetadadosTrecho(BaseModel):
         description="Trilha de navegação hierárquica (ex: Documento > Capítulo > Artigo)",
     )
     vigente: bool = Field(default=True, description="Indicador de vigência ativa do documento")
-    # TODO: Analisar quais outros campos estruturados são importantes como metadados de primeira classe:
-    # Ex: tipo_norma (Portaria, CLT, NR), orgao_emissor, data_publicacao, vigencia_inicio, vigencia_fim.
-    # FIXME: Reduzir redundância do campo 'extra' JSONB - evitar armazenar dados repetidos
-    # como 'secoes_map' vs 'hierarquia' e bboxes duplicadas.
     extra: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Metadados adicionais flexíveis persistidos em JSONB (hierarquia, bboxes, coordenadas, etc.)",
+        description="Metadados estruturados flexíveis em JSONB (id_pergunta, tambem_perguntam, fonte_item, coordenadas, etc.)",
     )
 
 
@@ -60,11 +86,17 @@ class ContextoRAG(BaseModel):
             linhas_meta = [f"--- [FONTE {i}]: {meta.titulo} (Versão: {meta.versao}) ---"]
             if meta.breadcrumb:
                 linhas_meta.append(f"- Trilha: {meta.breadcrumb}")
+            id_pergunta = meta.extra.get("id_pergunta") if meta.extra else None
+            if id_pergunta:
+                linhas_meta.append(f"- ID Pergunta: {id_pergunta}")
             secao_str = meta.secao if meta.secao else "Não informada"
             linhas_meta.append(f"- Seção/Artigo: {secao_str}")
             pagina_str = f"Página: {meta.pagina}" if meta.pagina is not None else "Página: N/A"
             linhas_meta.append(f"- {pagina_str}")
             linhas_meta.append(f"- Fonte: {meta.fonte}")
+            fonte_item = meta.extra.get("fonte_item") if meta.extra else None
+            if fonte_item:
+                linhas_meta.append(f"- Fonte do Trecho: {fonte_item}")
             linhas_meta.append(f"- Score de Similaridade: {trecho.score:.4f}")
             linhas_meta.append("Conteúdo:")
             linhas_meta.append(trecho.conteudo.strip())
