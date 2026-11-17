@@ -190,7 +190,7 @@ sequenceDiagram
     - Ler a imagem (`.png`, `.jpg`) ou `.pdf` a partir do `arquivo_uri` no armazenamento privado.
     - Calcular/conferir o hash `sha256` do arquivo.
     - Executar o OCR para extrair o texto bruto e a confiança média de leitura (sinalizando `legibilidade = "ilegivel"` caso a imagem esteja em branco, corrompida ou ilegível).
-- [ ] **Task 1A.2 — Engenharia de Prompts do A1 (`prompts.py`):**
+- [x] **Task 1A.2 — Engenharia de Prompts do A1 (`prompts.py`):**
   - `SYSTEM_PROMPT_EXTRACAO_ATESTADO`: Instrui o LLM a extrair os campos de `AtestadoExtraido` a partir do texto do OCR:
     - Nunca adivinhar campos ilegíveis (deixar `null` quando a confiança for $< 0.8$, conforme Anexo E.2).
     - Não pedir dados que já estão no `registro_inicial` do login.
@@ -305,14 +305,19 @@ Esta seção registra o setup local validado na branch `feat/a1-recepcao` (Task 
      & "$pgRoot\pgsql\bin\pg_ctl.exe" -D "$pgRoot\data" stop
      ```
 
-### 7.2 Referência da Entrega da Frente 1B (para `servico.py` e Checkpoint 1)
+### 7.2 Referência das Entregas da Fase 1 (Tasks `1A.1`, `1A.2` e Frente `1B`)
 
-- **[`validador.py`](../src/sinergia/agentes/a1_recepcao/validador.py):**
+- **[`ocr.py`](../src/sinergia/agentes/a1_recepcao/ocr.py) (Task `1A.1`):**
+  - `processar_arquivo_atestado(arquivo_uri, mime, sha256_esperado)`: resolve caminhos relativos (sem duplicar `ATESTADOS_STORAGE_DIR`) e URIs `file://` no Windows/POSIX, valida MIME (`image/png`, `image/jpeg`, `application/pdf`), calcula/valida hash `sha256`, renderiza páginas PDF via `PyMuPDF` (`2.0x`) e executa `RapidOCR` em instância cacheada (`@lru_cache`), retornando `ResultadoOCR` (`legibilidade = "ilegivel"` para imagens em branco, corrompidas ou confiança média `< 0.30`).
+- **[`prompts.py`](../src/sinergia/agentes/a1_recepcao/prompts.py) (Task `1A.2`):**
+  - `SYSTEM_PROMPT_EXTRACAO_ATESTADO` e `construir_mensagens_extracao(...)`: extração estruturada (`AtestadoExtraido`) com cálculo inclusivo (`fim = inicio + (N - 1)`), limiar `0.80`, alternância dinâmica de `POLITICA_EXTRAIR_CID`, suporte a declarações de comparecimento, tratamento explícito de OCR vazio e sanitização anti-injeção (`<texto_ocr>`).
+  - `SYSTEM_PROMPT_CONVERSAR_A1`, `AnaliseConversaA1` e `construir_mensagens_conversar(...)`: atendimento acolhedor pelo primeiro nome, detecção de `faltando`, conformidade com LGPD Art. 11 (não solicita dados de login/cadastro ou CID/sintomas) e sinalização de alteração de contato (`solicitou_alteracao_contato`) para o RH.
+- **[`validador.py`](../src/sinergia/agentes/a1_recepcao/validador.py) (Task `1B.1`):**
   - `nomes_compativeis(nome_documento, nome_cadastro)`: normaliza acentos/conectivos e aceita sobrenome abreviado (ex.: `"Carla S."` $\leftrightarrow$ `"Carla Souza"`).
   - `detectar_divergencias(extraido, registro_inicial)` e `gerar_mensagem_confirmacao_extracao(extraido, divergencias)`: confronta `dias`, `inicio` e `nome` sem rejeitar sumariamente o documento (`Anexo E.2` / Mahbub et al., 2026).
   - `mesclar_atestado_confirmado(confirmado, base_extraida)`: preserva campos extraídos previamente quando `a1.confirmar` recebe apenas subconjunto de campos (`Anexo D.1`).
   - `validar_dados_confirmados(...)`: valida período (`fim >= inicio` $\rightarrow$ `"data de fim anterior à de início"`, `data_emissao <= fim`), vínculo ativo, conselho/UF (`CRM`, `CRO`, `CRP` + `UFS_BRASIL`), sintaxe CID-10 (`cid_sintaxe_valida`), define `origem` (`"IA"` vs `"MANUAL"`) e calcula `calcular_prazo_entrega_fisica()` (2 dias úteis após o retorno ao trabalho) e `calcular_marcos_legais()` (16º dia INSS isolado ou acumulado em 60 dias e exame de retorno NR-07 $\ge 30$ dias).
-- **[`repositorio.py`](../src/sinergia/agentes/a1_recepcao/repositorio.py):**
+- **[`repositorio.py`](../src/sinergia/agentes/a1_recepcao/repositorio.py) (Task `1B.2`):**
   - Define `RepositorioA1Protocol` com duas implementações intercambiáveis: `RepositorioA1Postgres` (`psycopg` parametrizado) e `RepositorioA1Memoria` (pré-carregada com o caso canônico do Anexo D para testes/simulação offline).
   - Respeita estritamente a matriz do **Anexo C.2**: lê `cadastro.*` (`colaborador`, `cargo`, `setor`, `municipio`, `uf`, `usuario`) e catálogos (`conselho_profissional`, `cid`), lê/grava apenas em `afastamento.profissional_saude` e `afastamento.atestado`, e **nunca** acessa `orquestracao.*`, `bem_estar.*`, `apoio.*` ou `rag.*`.
   - Espelha as restrições `CHECK` do DDL em `RegistroAtestadoDB`, faz lookup tolerante a acentos em `buscar_id_municipio()`, resolve `login` $\rightarrow$ `id_usuario` em `resolver_id_usuario()` (ex.: `"rh.ana"`) e garante baixa física atômica (`recebido_fisico_em` + `recebido_fisico_por`).
@@ -322,4 +327,4 @@ Esta seção registra o setup local validado na branch `feat/a1-recepcao` (Task 
   .venv\Scripts\ruff.exe check src/sinergia/agentes/a1_recepcao/ tests/a1_recepcao/
   .venv\Scripts\python.exe tests/a1_recepcao/test_contrato_fase0.py
   ```
-  Resultado validado: **14 testes aprovados** (3 de contrato da Fase 0 em [`test_contrato_fase0.py`](../tests/a1_recepcao/test_contrato_fase0.py) + 11 da Frente 1B em [`test_frente_1b.py`](../tests/a1_recepcao/test_frente_1b.py)) e linter `ruff` sem erros.
+  Resultado validado: **28 testes aprovados** (3 de contrato da Fase 0 em [`test_contrato_fase0.py`](../tests/a1_recepcao/test_contrato_fase0.py) + 11 da Frente 1B em [`test_frente_1b.py`](../tests/a1_recepcao/test_frente_1b.py) + 8 da Task 1A.1 em [`test_ocr.py`](../tests/a1_recepcao/test_ocr.py) + 6 da Task 1A.2 em [`test_prompts_1a2.py`](../tests/a1_recepcao/test_prompts_1a2.py)) e linter `ruff` sem erros.

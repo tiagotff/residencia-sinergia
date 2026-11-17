@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+from functools import lru_cache
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from typing import Any
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 import numpy as np
 from PIL import Image, ImageChops, ImageStat, UnidentifiedImageError
@@ -45,17 +48,22 @@ def _resolver_arquivo(arquivo_uri: str) -> Path:
         if parsed.scheme and parsed.scheme.lower() != "file":
             raise ValueError("Somente arquivos locais ou URIs file:// são aceitos.")
         if parsed.scheme:
-            caminho = Path(unquote(parsed.path))
             if parsed.netloc and parsed.netloc not in {"", "localhost"}:
-                caminho = Path(f"//{parsed.netloc}{parsed.path}")
+                caminho = Path(url2pathname(f"//{parsed.netloc}{parsed.path}"))
+            else:
+                caminho = Path(url2pathname(parsed.path))
         else:
-            caminho = obter_config_a1().atestados_storage_dir / caminho_nativo
+            storage_dir = obter_config_a1().atestados_storage_dir
+            ja_prefixado = bool(
+                storage_dir.parts
+                and caminho_nativo.parts[: len(storage_dir.parts)] == storage_dir.parts
+            )
+            if ja_prefixado or caminho_nativo.exists():
+                caminho = caminho_nativo
+            else:
+                caminho = storage_dir / caminho_nativo
 
-    if not caminho.is_absolute():
-        caminho = caminho.expanduser().resolve(strict=False)
-    else:
-        caminho = caminho.expanduser().resolve(strict=False)
-    return caminho
+    return caminho.expanduser().resolve(strict=False)
 
 
 def _calcular_sha256(caminho: Path) -> str:
@@ -87,7 +95,7 @@ def _imagem_esta_em_branco(imagem: Image.Image) -> bool:
     if estatisticas.extrema[0][0] == estatisticas.extrema[0][1]:
         return True
 
-    fundo = Image.new("L", escala_de_cinza.size, estatisticas.mean[0])
+    fundo = Image.new("L", escala_de_cinza.size, round(estatisticas.mean[0]))
     diferenca = ImageChops.difference(escala_de_cinza, fundo)
     if diferenca.getbbox() is None:
         return True
@@ -98,13 +106,17 @@ def _imagem_esta_em_branco(imagem: Image.Image) -> bool:
         return True
 
 
-def _executar_rapidocr(imagem: Image.Image) -> tuple[str, float | None]:
+@lru_cache(maxsize=1)
+def _obter_motor_rapidocr() -> Any:
     if RapidOCR is None:
         raise RuntimeError(
             "Dependência OCR indisponível: instale rapidocr-onnxruntime."
         )
+    return RapidOCR()
 
-    motor = RapidOCR()
+
+def _executar_rapidocr(imagem: Image.Image) -> tuple[str, float | None]:
+    motor = _obter_motor_rapidocr()
     retorno = motor(np.asarray(imagem))
     itens = None
     if hasattr(retorno, "box_res_list"):

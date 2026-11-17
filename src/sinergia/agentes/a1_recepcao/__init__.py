@@ -2,6 +2,17 @@
 
 from sinergia.agentes.a1_recepcao.config import A1Config, obter_config_a1
 from sinergia.agentes.a1_recepcao.ocr import processar_arquivo_atestado
+from sinergia.agentes.a1_recepcao.prompts import (
+    SYSTEM_PROMPT_CONVERSAR_A1,
+    SYSTEM_PROMPT_EXTRACAO_ATESTADO,
+    AnaliseConversaA1,
+    construir_mensagens_conversar,
+    construir_mensagens_extracao,
+    construir_prompt_sistema_conversar,
+    construir_prompt_sistema_extracao,
+    construir_prompt_usuario_conversar,
+    construir_prompt_usuario_extracao,
+)
 from sinergia.agentes.a1_recepcao.repositorio import (
     DadosColaboradorCadastro,
     RegistroAtestadoDB,
@@ -63,9 +74,12 @@ from sinergia.agentes.a1_recepcao.validador import (
 __all__ = [
     "CONSELHOS_ACEITOS_PADRAO",
     "PROTOCOLO_SINERGIA",
+    "SYSTEM_PROMPT_CONVERSAR_A1",
+    "SYSTEM_PROMPT_EXTRACAO_ATESTADO",
     "UFS_BRASIL",
     "A1Config",
     "AcaoA1",
+    "AnaliseConversaA1",
     "AtestadoExtraido",
     "ContextoTarefa",
     "CorrelacaoEnvelope",
@@ -107,6 +121,12 @@ __all__ = [
     "calcular_marcos_legais",
     "calcular_prazo_entrega_fisica",
     "cid_sintaxe_valida",
+    "construir_mensagens_conversar",
+    "construir_mensagens_extracao",
+    "construir_prompt_sistema_conversar",
+    "construir_prompt_sistema_extracao",
+    "construir_prompt_usuario_conversar",
+    "construir_prompt_usuario_extracao",
     "detectar_divergencias",
     "exportar_json_schemas_a1",
     "gerar_mensagem_confirmacao_extracao",

@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 
 import pymupdf
 import pytest
 from PIL import Image
 
-from sinergia.agentes.a1_recepcao import ocr, processar_arquivo_atestado
+from sinergia.agentes.a1_recepcao import (
+    construir_mensagens_extracao,
+    ocr,
+    processar_arquivo_atestado,
+)
 
 
 def test_processa_png_calcula_hash_e_confere_sha256(tmp_path, monkeypatch) -> None:
@@ -89,3 +94,54 @@ def test_pdf_em_branco_retorna_ilegivel(tmp_path) -> None:
 
     assert resultado.legibilidade == "ilegivel"
     assert resultado.texto_extraido == ""
+
+
+def test_resolver_arquivo_nao_duplica_storage_e_aceita_file_uri(tmp_path) -> None:
+    caminho_fixture = ocr._resolver_arquivo(".storage/atestados/atestado_carla_105.png")
+    esperado = (Path(".storage/atestados") / "atestado_carla_105.png").resolve(
+        strict=False
+    )
+    assert caminho_fixture == esperado
+
+    arquivo = tmp_path / "atestado teste.png"
+    arquivo.write_bytes(b"ok")
+    resolvido_uri = ocr._resolver_arquivo(arquivo.as_uri())
+    assert resolvido_uri == arquivo.resolve()
+
+
+def test_integracao_real_ocr_pdf_para_prompts_1a1_e_1a2(tmp_path) -> None:
+    """Executa OCR real (PyMuPDF + RapidOCR) e encadeia na Task 1A.2 (`prompts.py`)."""
+    pdf = tmp_path / "atestado_carla_real.pdf"
+    documento = pymupdf.open()
+    pagina = documento.new_page(width=600, height=350)
+    pagina.insert_text(
+        (40, 60),
+        (
+            "ATESTADO MEDICO\n\n"
+            "Atesto que Carla Souza necessita de 3 dias de afastamento\n"
+            "a partir de 09/11/2026.\n\n"
+            "Campinas - SP, 09/11/2026\n"
+            "Dr. Marcos Lima - CRM/SP 123456"
+        ),
+        fontsize=18,
+    )
+    documento.save(pdf)
+    documento.close()
+
+    resultado_ocr = processar_arquivo_atestado(str(pdf), mime="application/pdf")
+
+    assert resultado_ocr.legibilidade == "ok"
+    assert resultado_ocr.confianca_media is not None
+    assert resultado_ocr.confianca_media >= 0.70
+    assert "carla" in resultado_ocr.texto_extraido.lower()
+    assert "123456" in resultado_ocr.texto_extraido
+
+    mensagens = construir_mensagens_extracao(
+        resultado_ocr.texto_extraido,
+        extrair_cid=True,
+        confianca_media_ocr=resultado_ocr.confianca_media,
+        mime=resultado_ocr.mime,
+    )
+    assert len(mensagens) == 2
+    assert "application/pdf" in mensagens[1][1]
+    assert "Carla" in mensagens[1][1] or "carla" in mensagens[1][1].lower()
