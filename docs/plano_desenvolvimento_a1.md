@@ -148,7 +148,7 @@ sequenceDiagram
 
 - [x] **Task 0.1 — Setup Local, Dependências de OCR e Banco de Dados:**
   - Copiar `.env.example` para `.env` e configurar `GROQ_API_KEY` e `POLITICA_EXTRAIR_CID=true`.
-  - Subir o container PostgreSQL 16 + pgvector (`docker compose up -d`) e aplicar `db/schema/001_schema_inicial.sql`.
+  - Subir o container PostgreSQL 16 + pgvector (`docker compose up -d`) ou PostgreSQL 16 local nativo/portátil no Windows e aplicar `db/schema/001_schema_inicial.sql`. *(Detalhes operacionais registrados na Seção 7).*
   - Instalar dependências de OCR/PDF (`Pillow`, `pymupdf` ou `pypdf`, `rapidocr-onnxruntime` ou `pytesseract`) e o pacote local (`pip install -e ".[dev]"`).
 - [x] **Task 0.2 — Contrato `sinergia/1` do A1 (`schemas.py` e `config.py`):**
   - Implementar os modelos Pydantic seguindo exatamente os **Anexos A, B, C.2 e D.2** da `Documentação - SinergIA v2.1.docx`:
@@ -274,3 +274,52 @@ sequenceDiagram
   - Abrir o Pull Request da branch `feat/a1-recepcao` para a `main`.
 
 > **✅ CHECKPOINT 3 (Definition of Done):** Testes de contrato `sinergia/1` passando no `pytest`, métricas $\ge 80\%$ e $\ge 90\%$ comprovadas, trechos da Seção 5.3/9/11 preenchidos e PR aberto!
+
+---
+
+## 7. Guia Prático de Execução Local e Registro da Frente 1B
+
+Esta seção registra o setup local validado na branch `feat/a1-recepcao` (Task `0.1`) e a referência técnica dos módulos entregues na **Frente 1B** para apoiar o **Checkpoint 1** e a **Fase 2 (`servico.py`)**.
+
+### 7.1 Setup Local no Windows (`.venv`, `.env` e PostgreSQL 16)
+
+1. **Ambiente Python (`.venv` via `uv`):**
+   - Python **3.12** instalado em `.venv/` com o pacote local em modo editável (`sinergia`), bibliotecas de contrato/testes (`pydantic`, `pydantic-settings`, `python-dotenv`, `jsonschema`, `pytest`, `ruff`), banco (`psycopg[binary]`, `sqlalchemy`, `alembic`, `pgvector`), LLM/grafo (`langchain`, `langchain-groq`, `langgraph`) e OCR/PDF (`pillow`, `pymupdf>=1.24.3`, `rapidocr-onnxruntime`).
+2. **Variáveis de ambiente (`.env`):**
+   - Arquivo `.env` criado na raiz (ignorado pelo `.gitignore`) com:
+     - `DATABASE_URL=postgresql://sinergia:sinergia@localhost:5432/sinergia`
+     - `POLITICA_EXTRAIR_CID=true`, `LIMIAR_CONFIANCA_CAMPO=0.8`, `PRAZO_ENTREGA_FISICA_DIAS_UTEIS=2`, `ATESTADOS_STORAGE_DIR=.storage/atestados`
+     - `GROQ_API_KEY=` *(preencher localmente antes de rodar a Frente 1A com o Groq real)*.
+3. **Banco de dados PostgreSQL 16 (`localhost:5432`):**
+   - **Opção A (Docker):** `docker compose up -d` sobe `pgvector/pgvector:pg16` conforme [`docker-compose.yml`](../docker-compose.yml).
+   - **Opção B (PostgreSQL 16.16 portátil no Windows — sem WSL2/Docker):** instalado a partir dos binários oficiais em `%LOCALAPPDATA%\Programs\PostgreSQL\16` (cluster `data`, usuário `sinergia`, banco `sinergia`).
+   - Como o pacote binário portátil do Windows não inclui a DLL nativa do `pgvector`, a aplicação de [`db/schema/001_schema_inicial.sql`](../db/schema/001_schema_inicial.sql) foi feita **sem modificar o arquivo versionado**, substituindo em memória apenas o tipo/extensão `vector` por `CREATE DOMAIN public.vector AS real[];` e omitindo localmente o índice `ix_trecho_embedding` (`USING hnsw`). Todas as **48 tabelas e 5 visões** dos 6 schemas foram criadas, além dos dados seed canônicos do caso `42` (Carla Souza / Campinas-SP), usuária `rh.ana`, conselhos `CRM`/`CRO`/`CRP` e CIDs base.
+   - **Comandos de controle do PostgreSQL local no PowerShell:**
+     ```powershell
+     $pgRoot = "$env:LOCALAPPDATA\Programs\PostgreSQL\16"
+     # Iniciar:
+     & "$pgRoot\pgsql\bin\pg_ctl.exe" -D "$pgRoot\data" -l "$pgRoot\postgres.log" -o "-p 5432" start
+     # Verificar status:
+     & "$pgRoot\pgsql\bin\pg_ctl.exe" -D "$pgRoot\data" status
+     # Parar:
+     & "$pgRoot\pgsql\bin\pg_ctl.exe" -D "$pgRoot\data" stop
+     ```
+
+### 7.2 Referência da Entrega da Frente 1B (para `servico.py` e Checkpoint 1)
+
+- **[`validador.py`](../src/sinergia/agentes/a1_recepcao/validador.py):**
+  - `nomes_compativeis(nome_documento, nome_cadastro)`: normaliza acentos/conectivos e aceita sobrenome abreviado (ex.: `"Carla S."` $\leftrightarrow$ `"Carla Souza"`).
+  - `detectar_divergencias(extraido, registro_inicial)` e `gerar_mensagem_confirmacao_extracao(extraido, divergencias)`: confronta `dias`, `inicio` e `nome` sem rejeitar sumariamente o documento (`Anexo E.2` / Mahbub et al., 2026).
+  - `mesclar_atestado_confirmado(confirmado, base_extraida)`: preserva campos extraídos previamente quando `a1.confirmar` recebe apenas subconjunto de campos (`Anexo D.1`).
+  - `validar_dados_confirmados(...)`: valida período (`fim >= inicio` $\rightarrow$ `"data de fim anterior à de início"`, `data_emissao <= fim`), vínculo ativo, conselho/UF (`CRM`, `CRO`, `CRP` + `UFS_BRASIL`), sintaxe CID-10 (`cid_sintaxe_valida`), define `origem` (`"IA"` vs `"MANUAL"`) e calcula `calcular_prazo_entrega_fisica()` (2 dias úteis após o retorno ao trabalho) e `calcular_marcos_legais()` (16º dia INSS isolado ou acumulado em 60 dias e exame de retorno NR-07 $\ge 30$ dias).
+- **[`repositorio.py`](../src/sinergia/agentes/a1_recepcao/repositorio.py):**
+  - Define `RepositorioA1Protocol` com duas implementações intercambiáveis: `RepositorioA1Postgres` (`psycopg` parametrizado) e `RepositorioA1Memoria` (pré-carregada com o caso canônico do Anexo D para testes/simulação offline).
+  - Respeita estritamente a matriz do **Anexo C.2**: lê `cadastro.*` (`colaborador`, `cargo`, `setor`, `municipio`, `uf`, `usuario`) e catálogos (`conselho_profissional`, `cid`), lê/grava apenas em `afastamento.profissional_saude` e `afastamento.atestado`, e **nunca** acessa `orquestracao.*`, `bem_estar.*`, `apoio.*` ou `rag.*`.
+  - Espelha as restrições `CHECK` do DDL em `RegistroAtestadoDB`, faz lookup tolerante a acentos em `buscar_id_municipio()`, resolve `login` $\rightarrow$ `id_usuario` em `resolver_id_usuario()` (ex.: `"rh.ana"`) e garante baixa física atômica (`recebido_fisico_em` + `recebido_fisico_por`).
+- **Verificação automatizada (`tests/a1_recepcao/`):**
+  ```powershell
+  .venv\Scripts\pytest.exe tests/a1_recepcao/ -v
+  .venv\Scripts\ruff.exe check src/sinergia/agentes/a1_recepcao/ tests/a1_recepcao/
+  .venv\Scripts\python.exe tests/a1_recepcao/test_contrato_fase0.py
+  ```
+  Resultado validado: **14 testes aprovados** (3 de contrato da Fase 0 em [`test_contrato_fase0.py`](../tests/a1_recepcao/test_contrato_fase0.py) + 11 da Frente 1B em [`test_frente_1b.py`](../tests/a1_recepcao/test_frente_1b.py)) e linter `ruff` sem erros.
