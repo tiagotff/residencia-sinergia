@@ -24,7 +24,9 @@ from sinergia.rag.pitch.ollama_service import (
 )
 from sinergia.rag.retrievers import BuscadorHibrido
 
-APP_PATH = str(Path(__file__).resolve().parents[2] / "pitch" / "app.py")
+APP_PATH = str(
+    Path(__file__).resolve().parents[3] / "src" / "sinergia" / "rag" / "pitch" / "app.py"
+)
 
 
 def _fake_http_response(payload: dict) -> MagicMock:
@@ -147,14 +149,17 @@ class TestPitchApp(unittest.TestCase):
             ]
         )
 
+        groq_service = GroqPitchService(api_key="gsk_test_key")
+        st.cache_resource.clear()
+
         with (
+            patch("sinergia.rag.retrievers.BuscadorHibrido", return_value=buscador_mock),
             patch(
-                "sinergia.rag.pitch.app.obter_buscador_pitch", return_value=buscador_mock
+                "sinergia.rag.pitch.ollama_service.GroqPitchService",
+                return_value=groq_service,
             ),
-            patch(
-                "sinergia.rag.pitch.app.obter_servico_groq",
-                return_value=GroqPitchService(api_key="gsk_test_key"),
-            ),
+            patch("sinergia.rag.chunking.chunking_documento_pdf", return_value=[]),
+            patch.object(buscador_mock, "adicionar_trechos_memoria"),
         ):
             # 1. Carga inicial -> Visão Global por padrão, sem opção de LLM local e presetado em openai/gpt-oss-20b
             at = AppTest.from_file(APP_PATH, default_timeout=15).run()
@@ -298,15 +303,17 @@ class TestPitchApp(unittest.TestCase):
             ]
         )
 
+        groq_service = GroqPitchService(api_key="gsk_test_key")
+        st.cache_resource.clear()
+
         with (
+            patch("sinergia.rag.retrievers.BuscadorHibrido", return_value=buscador_mock),
             patch(
-                "sinergia.rag.pitch.app.obter_buscador_pitch",
-                return_value=buscador_mock,
+                "sinergia.rag.pitch.ollama_service.GroqPitchService",
+                return_value=groq_service,
             ),
-            patch(
-                "sinergia.rag.pitch.app.obter_servico_groq",
-                return_value=GroqPitchService(api_key="gsk_test_key"),
-            ),
+            patch("sinergia.rag.chunking.chunking_documento_pdf", return_value=[]),
+            patch.object(buscador_mock, "adicionar_trechos_memoria"),
         ):
             at = AppTest.from_file(APP_PATH, default_timeout=15).run()
             self.assertFalse(at.exception)

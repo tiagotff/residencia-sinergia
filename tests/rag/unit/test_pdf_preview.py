@@ -12,9 +12,7 @@ from sinergia.rag.pitch.pdf_preview import (
     resolver_caminho_pdf,
 )
 
-DIRETORIO_MOCKS = (
-    Path(__file__).resolve().parents[3] / "src" / "sinergia" / "rag" / "data" / "mocks"
-)
+DIRETORIO_MOCKS = Path(__file__).resolve().parents[3] / "data" / "rag" / "mocks"
 
 
 def test_resolver_caminho_pdf_todas_bases() -> None:
