@@ -146,7 +146,7 @@ sequenceDiagram
 ### 🏁 FASE 0: Base Comum e Contratos `sinergia/1` (Juntos — Anexo F, Fase 0)
 **Objetivo:** Deixar o PostgreSQL e o OCR funcionando nas duas máquinas e congelar os modelos Pydantic do protocolo `sinergia/1` para o A1.
 
-- [ ] **Task 0.1 — Setup Local, Dependências de OCR e Banco de Dados:**
+- [x] **Task 0.1 — Setup Local, Dependências de OCR e Banco de Dados:**
   - Copiar `.env.example` para `.env` e configurar `GROQ_API_KEY` e `POLITICA_EXTRAIR_CID=true`.
   - Subir o container PostgreSQL 16 + pgvector (`docker compose up -d`) e aplicar `db/schema/001_schema_inicial.sql`.
   - Instalar dependências de OCR/PDF (`Pillow`, `pymupdf` ou `pypdf`, `rapidocr-onnxruntime` ou `pytesseract`) e o pacote local (`pip install -e ".[dev]"`).
