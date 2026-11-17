@@ -25,6 +25,8 @@ dependencies = [
     "rapidocr-onnxruntime",
     "python-dotenv",
     "pgvector",
+    "streamlit",
+    "httpx",
 ]
 
 [project.optional-dependencies]

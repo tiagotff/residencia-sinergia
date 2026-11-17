@@ -73,3 +73,50 @@ class ContextoRAG(BaseModel):
 
         return "\n\n".join(blocos)
 
+
+class DetalheScoreTrecho(BaseModel):
+    """Detalhamento dos scores e posições pré e pós-RRF para inspeção técnica de um trecho."""
+
+    id_trecho: Optional[int] = Field(default=None, description="ID do trecho no banco de dados")
+    conteudo: str = Field(..., description="Conteúdo textual do trecho")
+    metadados: MetadadosTrecho = Field(..., description="Metadados associados ao trecho")
+    rrf_score: float = Field(default=0.0, description="Pontuação final após fusão RRF")
+    dense_score: float = Field(default=0.0, description="Similaridade de cosseno no ranking denso")
+    dense_rank: Optional[int] = Field(default=None, description="Posição no ranking denso (1-based)")
+    lex_score: float = Field(default=0.0, description="Pontuação no ranking léxico (ts_rank ou overlap)")
+    lex_rank: Optional[int] = Field(default=None, description="Posição no ranking léxico (1-based)")
+
+
+class EstatisticasEmbedding(BaseModel):
+    """Estatísticas e amostra do vetor de embedding da consulta (768 dimensões)."""
+
+    modelo: str = Field(
+        default="tardellirs/colibri-embed-ptbr", description="Nome do modelo de embedding"
+    )
+    dimensoes: int = Field(default=768, description="Quantidade de dimensões do vetor")
+    norma_l2: float = Field(default=1.0, description="Norma L2 do vetor da consulta")
+    min_val: float = Field(default=0.0, description="Valor mínimo do vetor")
+    max_val: float = Field(default=0.0, description="Valor máximo do vetor")
+    mean_val: float = Field(default=0.0, description="Valor médio do vetor")
+    amostra: List[float] = Field(
+        default_factory=list, description="Primeiras dimensões do vetor (ex: 12 floats)"
+    )
+    vetor: List[float] = Field(
+        default_factory=list, description="Vetor completo de 768 dimensões"
+    )
+
+
+class ResultadoBuscaInstrumentada(BaseModel):
+    """Retorno instrumentado da busca híbrida contendo contexto final e telemetria detalhada."""
+
+    contexto: ContextoRAG = Field(..., description="ContextoRAG padrão retornado pela busca")
+    embed_ms: float = Field(default=0.0, description="Tempo de geração do embedding em ms")
+    db_rrf_ms: float = Field(default=0.0, description="Tempo de busca e fusão RRF em ms")
+    estatisticas_embedding: EstatisticasEmbedding = Field(
+        ..., description="Estatísticas do embedding 768d da consulta"
+    )
+    detalhes_trechos: List[DetalheScoreTrecho] = Field(
+        default_factory=list, description="Scores e ranks individuais por trecho"
+    )
+
+
