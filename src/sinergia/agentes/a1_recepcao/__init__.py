@@ -62,6 +62,11 @@ from sinergia.agentes.a1_recepcao.schemas import (
     TipoDocumentoAfastamento,
     exportar_json_schemas_a1,
 )
+from sinergia.agentes.a1_recepcao.servico import (
+    ServicoA1,
+    executar,
+    limpar_cache_idempotencia,
+)
 from sinergia.agentes.a1_recepcao.validador import (
     CONSELHOS_ACEITOS_PADRAO,
     UFS_BRASIL,
@@ -121,6 +126,7 @@ __all__ = [
     "ResultadoOCR",
     "ResultadoValidacaoConfirmacao",
     "SaidaMensagem",
+    "ServicoA1",
     "StatusAtestadoDB",
     "StatusEnvelopeResultado",
     "TarefaA1",
@@ -136,9 +142,11 @@ __all__ = [
     "construir_prompt_usuario_conversar",
     "construir_prompt_usuario_extracao",
     "detectar_divergencias",
+    "executar",
     "exportar_json_schemas_a1",
     "extrair_atestado_via_llm",
     "gerar_mensagem_confirmacao_extracao",
+    "limpar_cache_idempotencia",
     "mesclar_atestado_confirmado",
     "nomes_compativeis",
     "obter_cliente_llm",

@@ -230,7 +230,7 @@ sequenceDiagram
 #### 🔹 Frente 2A: Fachada Oficial `executar(tarefa) -> resultado` (`servico.py`)
 *Arquivos: `servico.py`, `__init__.py`*
 
-- [ ] **Task 2A.1 — Implementar `executar(tarefa: dict) -> dict` para as 4 Ações do Catálogo:**
+- [x] **Task 2A.1 — Implementar `executar(tarefa: dict) -> dict` para as 4 Ações do Catálogo:**
   - Garantir **idempotência por `id_mensagem`** (se `id_mensagem` já foi processada, retornar o mesmo `RESULTADO`).
   - Roteamento por `tarefa["acao"]` seguindo rigorosamente o **Anexo C.2 e D.2**:
     1. **`a1.conversar`:** Verifica o que falta (ex: `["arquivo"]`), retorna `status = "OK"`, `estado_proposto = "NOVO"`, `payload = {"faltando": ["arquivo"]}` e a mensagem em `saidas`.
@@ -305,7 +305,7 @@ Esta seção registra o setup local validado na branch `feat/a1-recepcao` (Task 
      & "$pgRoot\pgsql\bin\pg_ctl.exe" -D "$pgRoot\data" stop
      ```
 
-### 7.2 Referência das Entregas da Fase 1 (Frente `1A` e Frente `1B`)
+### 7.2 Referência das Entregas da Fase 1 e Frente `2A` (`servico.py`)
 
 - **[`ocr.py`](../src/sinergia/agentes/a1_recepcao/ocr.py) (Task `1A.1`):**
   - `processar_arquivo_atestado(arquivo_uri, mime, sha256_esperado)`: resolve caminhos relativos (sem duplicar `ATESTADOS_STORAGE_DIR`) e URIs `file://` no Windows/POSIX, valida MIME (`image/png`, `image/jpeg`, `application/pdf`), calcula/valida hash `sha256`, renderiza páginas PDF via `PyMuPDF` (`2.0x`) e executa `RapidOCR` em instância cacheada (`@lru_cache`), retornando `ResultadoOCR` (`legibilidade = "ilegivel"` para imagens em branco, corrompidas ou confiança média `< 0.30`).
@@ -317,6 +317,8 @@ Esta seção registra o setup local validado na branch `feat/a1-recepcao` (Task 
   - `MockLLM`: cliente injetável determinístico para rodar testes offline sem chamadas externas.
   - `extrair_atestado_via_llm(entrada_ocr, ...) -> tuple[AtestadoExtraido, DecisaoAgente]`: aplica curto-circuito para OCR vazio/ilegível (`usou_llm=False`), chama `.with_structured_output(AtestadoExtraido, method="json_schema")` (com fallback sem `method`), aplica `aplicar_politica_e_limiar` (`0.8` e `POLITICA_EXTRAIR_CID`), rebaixa para `ilegivel` se campos essenciais ficarem vazios e gera o bloco auditável `DecisaoAgente`.
   - `analisar_conversa_atestado(texto, historico_resumo, registro_inicial, ...) -> tuple[AnaliseConversaA1, DecisaoAgente]`: conduz `a1.conversar`, garante `"arquivo"` em `faltando` quando `tem_documento` for falso e garante o encaminhamento ao RH em alterações de contato.
+- **[`servico.py`](../src/sinergia/agentes/a1_recepcao/servico.py) (Task `2A.1`):**
+  - `ServicoA1` e função oficial `executar(tarefa) -> resultado`: implementam o envelope `sinergia/1` com idempotência por `id_mensagem`, roteamento das 4 ações (`a1.conversar`, `a1.processar_documento`, `a1.confirmar`, `a1.registrar_baixa_fisica`), detecção de arquivo duplicado, preservação dos dados do profissional/município entre extração `PENDENTE` e confirmação `CONFIRMADO`, além de tratamento padronizado de `status = "ERRO"`.
 - **[`validador.py`](../src/sinergia/agentes/a1_recepcao/validador.py) (Task `1B.1`):**
   - `nomes_compativeis(nome_documento, nome_cadastro)`: normaliza acentos/conectivos e aceita sobrenome abreviado (ex.: `"Carla S."` $\leftrightarrow$ `"Carla Souza"`).
   - `detectar_divergencias(extraido, registro_inicial)` e `gerar_mensagem_confirmacao_extracao(extraido, divergencias)`: confronta `dias`, `inicio` e `nome` sem rejeitar sumariamente o documento (`Anexo E.2` / Mahbub et al., 2026).
@@ -332,4 +334,4 @@ Esta seção registra o setup local validado na branch `feat/a1-recepcao` (Task 
   .venv\Scripts\ruff.exe check src/sinergia/agentes/a1_recepcao/ tests/a1_recepcao/
   .venv\Scripts\python.exe tests/a1_recepcao/test_contrato_fase0.py
   ```
-  Resultado validado: **34 testes aprovados** (3 de contrato da Fase 0 em [`test_contrato_fase0.py`](../tests/a1_recepcao/test_contrato_fase0.py) + 11 da Frente 1B em [`test_frente_1b.py`](../tests/a1_recepcao/test_frente_1b.py) + 8 da Task 1A.1 em [`test_ocr.py`](../tests/a1_recepcao/test_ocr.py) + 6 da Task 1A.2 em [`test_prompts_1a2.py`](../tests/a1_recepcao/test_prompts_1a2.py) + 6 da Task 1A.3 em [`test_extrator_llm_1a3.py`](../tests/a1_recepcao/test_extrator_llm_1a3.py)) e linter `ruff` sem erros.
+  Resultado validado: **39 testes aprovados** (3 de contrato da Fase 0 em [`test_contrato_fase0.py`](../tests/a1_recepcao/test_contrato_fase0.py) + 11 da Frente 1B em [`test_frente_1b.py`](../tests/a1_recepcao/test_frente_1b.py) + 8 da Task 1A.1 em [`test_ocr.py`](../tests/a1_recepcao/test_ocr.py) + 6 da Task 1A.2 em [`test_prompts_1a2.py`](../tests/a1_recepcao/test_prompts_1a2.py) + 6 da Task 1A.3 em [`test_extrator_llm_1a3.py`](../tests/a1_recepcao/test_extrator_llm_1a3.py) + 5 da Task 2A.1 em [`test_servico_2a1.py`](../tests/a1_recepcao/test_servico_2a1.py)) e linter `ruff` sem erros.

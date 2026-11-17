@@ -194,7 +194,12 @@ def test_modelo_analise_conversa_valida_campos() -> None:
 )
 def test_groq_extracao_e_conversar_reais_com_prompts() -> None:
     """Valida os 5 cenários reais contra `ChatGroq` e integra com `validador.py`."""
-    llm = ChatGroq(model=_CFG.llm_model, api_key=_CFG.groq_api_key, temperature=0)
+    llm = ChatGroq(
+        model=_CFG.llm_model,
+        api_key=_CFG.groq_api_key,
+        temperature=0,
+        max_retries=6,
+    )
 
     texto_ocr_carla = (
         "CLINICA MEDICA CAMPINAS\n"
