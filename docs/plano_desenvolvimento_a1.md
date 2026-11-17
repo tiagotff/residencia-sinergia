@@ -1,8 +1,8 @@
-# Plano de Desenvolvimento do Agente 1 (`A1 — Recepção e Processamento`) — Alinhado à v2.1
+# Plano de Desenvolvimento do Agente 1 (`A1 — Recepção e Processamento`) — Alinhado à v2.2
 **Dupla responsável:** Ítalo & Natália  
 **Escopo no repositório:** [`src/sinergia/agentes/a1_recepcao/`](../src/sinergia/agentes/a1_recepcao/__init__.py)  
 **Branch oficial:** `feat/a1-recepcao` ([`CONTRIBUTING.md`](../CONTRIBUTING.md))  
-**Documento-base:** `docs/Documentação - SinergIA v2.1.docx` (Seção 5.3 e Anexos A, B, C.2, D.2, E.2, F, G e H)
+**Documento-base:** `docs/Documentação - SinergIA v2.2.docx` (Seção 5.3 e Anexos A, B, C.2, D.2, E.2, F, G e H)
 
 ---
 
@@ -32,7 +32,7 @@ A revisão **v2.1** (alinhada aos contratos v0.7 do grupo) trouxe decisões impo
 
 ---
 
-## 2. Acesso ao Banco de Dados pelo A1 (Anexo C.2 da v2.1)
+## 2. Acesso ao Banco de Dados pelo A1 (Anexo C.2 da v2.2)
 
 Conforme a tabela oficial do **Anexo C.2**, os dados de `cadastro` e os catálogos (`conselho_profissional`, `cid`) são **dados de origem** (carregados pela empresa e **somente lidos** pelo A1). O A1 só grava em duas tabelas do schema `afastamento`:
 
@@ -109,7 +109,7 @@ tests/a1_recepcao/
 
 ## 5. Fluxo de Trabalho e Comunicação da Dupla (Ítalo & Natália)
 
-Mantemos a dinâmica **"Contrato Juntos $\rightarrow$ Execução Paralela sem Conflito $\rightarrow$ Cross-Review Explicado"**, ajustada para as 4 ações da v2.1:
+Mantemos a dinâmica **"Contrato Juntos $\rightarrow$ Execução Paralela sem Conflito $\rightarrow$ Cross-Review Explicado"**, ajustada para as 4 ações da v2.2:
 
 ```mermaid
 sequenceDiagram
@@ -131,15 +131,15 @@ sequenceDiagram
     A->>G: Frente 2B (Fixtures, Imagens Sintéticas e Demo): fixtures JSON + gerador de atestados + cli_demo.py
     Note over A,B: CHECKPOINT 2 (Rodam as 4 ações no cli_demo.py com banco e Groq reais!)
 
-    Note over A,B: FASE 3 (Juntos - Validação de Contrato, Métricas e Doc v2.1)
+    Note over A,B: FASE 3 (Juntos - Validação de Contrato, Métricas e Doc v2.2)
     A->>G: Pytest de contrato (JSON Schema) + avaliação da meta >= 80% de extração sem correção
-    B->>G: Preenche prompts e evidências na Documentação v2.1 (Seções 5.3, 9 e 11) e abre PR
+    B->>G: Preenche prompts e evidências na Documentação v2.2 (Seções 5.3, 9 e 11) e abre PR
     Note over A,B: CHECKPOINT 3 (Agente 1 entregue e validado!)
 ```
 
 ---
 
-## 6. Estrutura Detalhada de Tasks e Checkpoints (Baseada na v2.1)
+## 6. Estrutura Detalhada de Tasks e Checkpoints (Baseada na v2.2)
 
 ---
 
@@ -151,7 +151,7 @@ sequenceDiagram
   - Subir o container PostgreSQL 16 + pgvector (`docker compose up -d`) ou PostgreSQL 16 local nativo/portátil no Windows e aplicar `db/schema/001_schema_inicial.sql`. *(Detalhes operacionais registrados na Seção 7).*
   - Instalar dependências de OCR/PDF (`Pillow`, `pymupdf` ou `pypdf`, `rapidocr-onnxruntime` ou `pytesseract`) e o pacote local (`pip install -e ".[dev]"`).
 - [x] **Task 0.2 — Contrato `sinergia/1` do A1 (`schemas.py` e `config.py`):**
-  - Implementar os modelos Pydantic seguindo exatamente os **Anexos A, B, C.2 e D.2** da `Documentação - SinergIA v2.1.docx`:
+  - Implementar os modelos Pydantic seguindo exatamente os **Anexos A, B, C.2 e D.2** da `Documentação - SinergIA v2.2.docx`:
     - **Envelope Base:** `Correlacao`, `ContextoTarefa`, `RegistroInicialCaso` (Anexo B), `SaidaMensagem`, `EventoEmitido`, `DecisaoAgente`, `ErroAgente`, `TarefaA1` e `ResultadoA1`.
     - **Modelo de Extração (`AtestadoExtraido` — Anexo D.2):**
       ```python
@@ -258,7 +258,7 @@ sequenceDiagram
 
 ---
 
-### 📊 FASE 3: Testes de Contrato (`Anexo F`), Métricas (`Seção 10`) e Documentação v2.1 (Juntos)
+### 📊 FASE 3: Testes de Contrato (`Anexo F`), Métricas (`Seção 10`) e Documentação v2.2 (Juntos)
 
 - [ ] **Task 3.1 — Testes Automatizados de Contrato e Regras (`pytest`):**
   - Validar que toda `TAREFA` das fixtures e todo `RESULTADO` produzido por `executar(tarefa)` passam 100% no JSON Schema do protocolo `sinergia/1` (**Anexo F**).
@@ -267,7 +267,7 @@ sequenceDiagram
   - Rodar a bateria de atestados sintéticos legíveis pelo pipeline `OCR -> ChatGroq` e medir:
     - **Atestados extraídos sem correção manual $\ge 80\%$**
     - **Atestados físicos baixados no prazo $\ge 90\%$**
-- [ ] **Task 3.3 — Preenchimento das Pendências na `Documentação - SinergIA v2.1.docx` e Pull Request:**
+- [ ] **Task 3.3 — Preenchimento das Pendências na `Documentação - SinergIA v2.2.docx` e Pull Request:**
   - **Seção 5.3:** Inserir o prompt completo de extração (`[Anexar o prompt completo de extração, disponível no repositório (agentes/a1_recepcao/).]`).
   - **Seção 9:** Preencher a IDE utilizada e detalhar os testes de contrato, unitários e de integração do A1.
   - **Seção 11:** Inserir os logs/evidências de execução das 4 ações do A1 e os resultados comparados às metas da Seção 10.
