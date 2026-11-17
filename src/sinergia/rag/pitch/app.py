@@ -40,7 +40,7 @@ from sinergia.rag.pitch.theme import (
 )
 from sinergia.rag.retrievers import BuscadorHibrido
 
-DIRETORIO_MOCKS = Path(__file__).resolve().parent.parent / "data" / "mocks"
+DIRETORIO_MOCKS = Path(__file__).resolve().parents[4] / "data" / "rag" / "mocks"
 
 
 def _banco_disponivel_com_dados(database_url: str) -> bool:
