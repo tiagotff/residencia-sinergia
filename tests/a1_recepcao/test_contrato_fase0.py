@@ -19,13 +19,10 @@ SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from sinergia.agentes.a1_recepcao import (  # noqa: E402
+from sinergia.agentes.a1_recepcao import (
     AtestadoExtraido,
-    PayloadConfirmarInvalidoResultado,
     PayloadConfirmarTarefa,
     PayloadConfirmarValidoResultado,
-    PayloadConversarResultado,
-    PayloadProcessarDocumentoResultado,
     ResultadoA1,
     TarefaA1,
     exportar_json_schemas_a1,

@@ -1,6 +1,13 @@
 """Pacote do Agente A1 — Recepção e Processamento (`sinergia/1`)."""
 
 from sinergia.agentes.a1_recepcao.config import A1Config, obter_config_a1
+from sinergia.agentes.a1_recepcao.repositorio import (
+    DadosColaboradorCadastro,
+    RegistroAtestadoDB,
+    RepositorioA1Memoria,
+    RepositorioA1Postgres,
+    RepositorioA1Protocol,
+)
 from sinergia.agentes.a1_recepcao.schemas import (
     PROTOCOLO_SINERGIA,
     AcaoA1,
@@ -37,14 +44,31 @@ from sinergia.agentes.a1_recepcao.schemas import (
     TipoDocumentoAfastamento,
     exportar_json_schemas_a1,
 )
+from sinergia.agentes.a1_recepcao.validador import (
+    CONSELHOS_ACEITOS_PADRAO,
+    UFS_BRASIL,
+    MarcosLegaisAfastamento,
+    ResultadoValidacaoConfirmacao,
+    calcular_marcos_legais,
+    calcular_prazo_entrega_fisica,
+    cid_sintaxe_valida,
+    detectar_divergencias,
+    gerar_mensagem_confirmacao_extracao,
+    mesclar_atestado_confirmado,
+    nomes_compativeis,
+    validar_dados_confirmados,
+)
 
 __all__ = [
-    "A1Config",
+    "CONSELHOS_ACEITOS_PADRAO",
     "PROTOCOLO_SINERGIA",
+    "UFS_BRASIL",
+    "A1Config",
     "AcaoA1",
     "AtestadoExtraido",
     "ContextoTarefa",
     "CorrelacaoEnvelope",
+    "DadosColaboradorCadastro",
     "DecisaoAgente",
     "DestinatarioSaida",
     "DivergenciaCampo",
@@ -53,6 +77,7 @@ __all__ = [
     "EventoEmitido",
     "FonteCitada",
     "LegibilidadeDocumento",
+    "MarcosLegaisAfastamento",
     "OrigemDadosAtestado",
     "PayloadBaixaFisicaResultado",
     "PayloadBaixaFisicaTarefa",
@@ -65,14 +90,27 @@ __all__ = [
     "PayloadProcessarDocumentoTarefa",
     "PeriodoAfastamento",
     "ProfissionalExtraido",
+    "RegistroAtestadoDB",
     "RegistroInicialCaso",
+    "RepositorioA1Memoria",
+    "RepositorioA1Postgres",
+    "RepositorioA1Protocol",
     "ResultadoA1",
     "ResultadoOCR",
+    "ResultadoValidacaoConfirmacao",
     "SaidaMensagem",
     "StatusAtestadoDB",
     "StatusEnvelopeResultado",
     "TarefaA1",
     "TipoDocumentoAfastamento",
+    "calcular_marcos_legais",
+    "calcular_prazo_entrega_fisica",
+    "cid_sintaxe_valida",
+    "detectar_divergencias",
     "exportar_json_schemas_a1",
+    "gerar_mensagem_confirmacao_extracao",
+    "mesclar_atestado_confirmado",
+    "nomes_compativeis",
     "obter_config_a1",
+    "validar_dados_confirmados",
 ]

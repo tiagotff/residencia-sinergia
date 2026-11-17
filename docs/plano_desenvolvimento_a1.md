@@ -204,13 +204,13 @@ sequenceDiagram
 #### 🔸 Frente 1B: Validador de Regras/Divergências e Repositório SQL (Anexo C.2)
 *Arquivos: `validador.py`, `repositorio.py`*
 
-- [ ] **Task 1B.1 — Validador de Regras de Negócio e Divergências (`validador.py`):**
+- [x] **Task 1B.1 — Validador de Regras de Negócio e Divergências (`validador.py`):**
   - Implementar `detectar_divergencias(extraido: AtestadoExtraido, registro_inicial: RegistroInicialCaso) -> list[DivergenciaCampo]` (Anexo C.2, D.2 e E.2):
     - Comparar dias calculados no documento (`(fim - inicio).days + 1`) com `registro_inicial.dias_informados` (ex: no documento = 3, informado = 5).
     - Comparar `extraido.periodo.inicio` com `registro_inicial.inicio_informado`.
     - Comparar `extraido.nome_no_documento` com `registro_inicial.nome`.
   - Implementar `validar_dados_confirmados(dados)` verificando `fim >= inicio` (retornando o motivo `"data de fim anterior à de início"` como no exemplo do Anexo D.2!), formato de conselho/UF e cálculo de `calcular_prazo_entrega_fisica(fim_afastamento, dias_uteis=2)`.
-- [ ] **Task 1B.2 — Repositório SQL Restrito ao Anexo C.2 (`repositorio.py`):**
+- [x] **Task 1B.2 — Repositório SQL Restrito ao Anexo C.2 (`repositorio.py`):**
   - Implementar apenas as leituras e gravações autorizadas para o A1 na tabela do **Anexo C.2**:
     - **Leitura em `cadastro`:** `conferir_colaborador_ativo(id_colaborador, inicio, fim)` em `cadastro.colaborador` / `cargo` / `setor` e buscar `id_municipio` por nome/UF.
     - **Leitura em catálogos de `afastamento`:** `validar_conselho_profissional(sigla, uf)` em `afastamento.conselho_profissional` e `validar_cid(codigo_cid)` em `afastamento.cid`.
