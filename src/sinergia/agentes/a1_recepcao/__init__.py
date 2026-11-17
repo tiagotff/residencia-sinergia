@@ -1,6 +1,7 @@
 """Pacote do Agente A1 — Recepção e Processamento (`sinergia/1`)."""
 
 from sinergia.agentes.a1_recepcao.config import A1Config, obter_config_a1
+from sinergia.agentes.a1_recepcao.ocr import processar_arquivo_atestado
 from sinergia.agentes.a1_recepcao.repositorio import (
     DadosColaboradorCadastro,
     RegistroAtestadoDB,
@@ -58,7 +59,6 @@ from sinergia.agentes.a1_recepcao.validador import (
     nomes_compativeis,
     validar_dados_confirmados,
 )
-from sinergia.agentes.a1_recepcao.ocr import processar_arquivo_atestado
 
 __all__ = [
     "CONSELHOS_ACEITOS_PADRAO",
@@ -113,6 +113,6 @@ __all__ = [
     "mesclar_atestado_confirmado",
     "nomes_compativeis",
     "obter_config_a1",
-    "validar_dados_confirmados",
     "processar_arquivo_atestado",
+    "validar_dados_confirmados",
 ]
