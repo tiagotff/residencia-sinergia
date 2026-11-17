@@ -196,7 +196,7 @@ sequenceDiagram
     - Não pedir dados que já estão no `registro_inicial` do login.
     - Extrair `cid` somente se constar no documento e se `POLITICA_EXTRAIR_CID` estiver ativa.
   - `SYSTEM_PROMPT_CONVERSAR_A1`: Para a ação `a1.conversar`, identificando de forma acolhedora o que falta o colaborador enviar (ex: foto/PDF do atestado) com base em `texto` e `historico_resumo`.
-- [ ] **Task 1A.3 — Extrator e Conversador LangChain + Groq (`extrator_llm.py`):**
+- [x] **Task 1A.3 — Extrator e Conversador LangChain + Groq (`extrator_llm.py`):**
   - Implementar `extrair_atestado_via_llm(texto_ocr: str, llm=None) -> tuple[AtestadoExtraido, DecisaoAgente]` usando `ChatGroq` + `.with_structured_output(AtestadoExtraido)`.
   - Implementar `analisar_conversa_atestado(texto: str, historico_resumo: str | None, registro_inicial: RegistroInicialCaso | None, llm=None)` para suportar a ação `a1.conversar`.
   - Suportar `MockLLM` injetável para rodar testes de contrato offline.
@@ -305,13 +305,18 @@ Esta seção registra o setup local validado na branch `feat/a1-recepcao` (Task 
      & "$pgRoot\pgsql\bin\pg_ctl.exe" -D "$pgRoot\data" stop
      ```
 
-### 7.2 Referência das Entregas da Fase 1 (Tasks `1A.1`, `1A.2` e Frente `1B`)
+### 7.2 Referência das Entregas da Fase 1 (Frente `1A` e Frente `1B`)
 
 - **[`ocr.py`](../src/sinergia/agentes/a1_recepcao/ocr.py) (Task `1A.1`):**
   - `processar_arquivo_atestado(arquivo_uri, mime, sha256_esperado)`: resolve caminhos relativos (sem duplicar `ATESTADOS_STORAGE_DIR`) e URIs `file://` no Windows/POSIX, valida MIME (`image/png`, `image/jpeg`, `application/pdf`), calcula/valida hash `sha256`, renderiza páginas PDF via `PyMuPDF` (`2.0x`) e executa `RapidOCR` em instância cacheada (`@lru_cache`), retornando `ResultadoOCR` (`legibilidade = "ilegivel"` para imagens em branco, corrompidas ou confiança média `< 0.30`).
 - **[`prompts.py`](../src/sinergia/agentes/a1_recepcao/prompts.py) (Task `1A.2`):**
   - `SYSTEM_PROMPT_EXTRACAO_ATESTADO` e `construir_mensagens_extracao(...)`: extração estruturada (`AtestadoExtraido`) com cálculo inclusivo (`fim = inicio + (N - 1)`), limiar `0.80`, alternância dinâmica de `POLITICA_EXTRAIR_CID`, suporte a declarações de comparecimento, tratamento explícito de OCR vazio e sanitização anti-injeção (`<texto_ocr>`).
   - `SYSTEM_PROMPT_CONVERSAR_A1`, `AnaliseConversaA1` e `construir_mensagens_conversar(...)`: atendimento acolhedor pelo primeiro nome, detecção de `faltando`, conformidade com LGPD Art. 11 (não solicita dados de login/cadastro ou CID/sintomas) e sinalização de alteração de contato (`solicitou_alteracao_contato`) para o RH.
+- **[`extrator_llm.py`](../src/sinergia/agentes/a1_recepcao/extrator_llm.py) (Task `1A.3`):**
+  - `obter_cliente_llm(...)`: instancia e cacheia (`@lru_cache`) o cliente `ChatGroq` uma única vez por configuração conforme o **Anexo C.2**.
+  - `MockLLM`: cliente injetável determinístico para rodar testes offline sem chamadas externas.
+  - `extrair_atestado_via_llm(entrada_ocr, ...) -> tuple[AtestadoExtraido, DecisaoAgente]`: aplica curto-circuito para OCR vazio/ilegível (`usou_llm=False`), chama `.with_structured_output(AtestadoExtraido, method="json_schema")` (com fallback sem `method`), aplica `aplicar_politica_e_limiar` (`0.8` e `POLITICA_EXTRAIR_CID`), rebaixa para `ilegivel` se campos essenciais ficarem vazios e gera o bloco auditável `DecisaoAgente`.
+  - `analisar_conversa_atestado(texto, historico_resumo, registro_inicial, ...) -> tuple[AnaliseConversaA1, DecisaoAgente]`: conduz `a1.conversar`, garante `"arquivo"` em `faltando` quando `tem_documento` for falso e garante o encaminhamento ao RH em alterações de contato.
 - **[`validador.py`](../src/sinergia/agentes/a1_recepcao/validador.py) (Task `1B.1`):**
   - `nomes_compativeis(nome_documento, nome_cadastro)`: normaliza acentos/conectivos e aceita sobrenome abreviado (ex.: `"Carla S."` $\leftrightarrow$ `"Carla Souza"`).
   - `detectar_divergencias(extraido, registro_inicial)` e `gerar_mensagem_confirmacao_extracao(extraido, divergencias)`: confronta `dias`, `inicio` e `nome` sem rejeitar sumariamente o documento (`Anexo E.2` / Mahbub et al., 2026).
@@ -327,4 +332,4 @@ Esta seção registra o setup local validado na branch `feat/a1-recepcao` (Task 
   .venv\Scripts\ruff.exe check src/sinergia/agentes/a1_recepcao/ tests/a1_recepcao/
   .venv\Scripts\python.exe tests/a1_recepcao/test_contrato_fase0.py
   ```
-  Resultado validado: **28 testes aprovados** (3 de contrato da Fase 0 em [`test_contrato_fase0.py`](../tests/a1_recepcao/test_contrato_fase0.py) + 11 da Frente 1B em [`test_frente_1b.py`](../tests/a1_recepcao/test_frente_1b.py) + 8 da Task 1A.1 em [`test_ocr.py`](../tests/a1_recepcao/test_ocr.py) + 6 da Task 1A.2 em [`test_prompts_1a2.py`](../tests/a1_recepcao/test_prompts_1a2.py)) e linter `ruff` sem erros.
+  Resultado validado: **34 testes aprovados** (3 de contrato da Fase 0 em [`test_contrato_fase0.py`](../tests/a1_recepcao/test_contrato_fase0.py) + 11 da Frente 1B em [`test_frente_1b.py`](../tests/a1_recepcao/test_frente_1b.py) + 8 da Task 1A.1 em [`test_ocr.py`](../tests/a1_recepcao/test_ocr.py) + 6 da Task 1A.2 em [`test_prompts_1a2.py`](../tests/a1_recepcao/test_prompts_1a2.py) + 6 da Task 1A.3 em [`test_extrator_llm_1a3.py`](../tests/a1_recepcao/test_extrator_llm_1a3.py)) e linter `ruff` sem erros.

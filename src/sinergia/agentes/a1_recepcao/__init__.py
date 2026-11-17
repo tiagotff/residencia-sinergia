@@ -1,6 +1,12 @@
 """Pacote do Agente A1 — Recepção e Processamento (`sinergia/1`)."""
 
 from sinergia.agentes.a1_recepcao.config import A1Config, obter_config_a1
+from sinergia.agentes.a1_recepcao.extrator_llm import (
+    MockLLM,
+    analisar_conversa_atestado,
+    extrair_atestado_via_llm,
+    obter_cliente_llm,
+)
 from sinergia.agentes.a1_recepcao.ocr import processar_arquivo_atestado
 from sinergia.agentes.a1_recepcao.prompts import (
     SYSTEM_PROMPT_CONVERSAR_A1,
@@ -93,6 +99,7 @@ __all__ = [
     "FonteCitada",
     "LegibilidadeDocumento",
     "MarcosLegaisAfastamento",
+    "MockLLM",
     "OrigemDadosAtestado",
     "PayloadBaixaFisicaResultado",
     "PayloadBaixaFisicaTarefa",
@@ -118,6 +125,7 @@ __all__ = [
     "StatusEnvelopeResultado",
     "TarefaA1",
     "TipoDocumentoAfastamento",
+    "analisar_conversa_atestado",
     "calcular_marcos_legais",
     "calcular_prazo_entrega_fisica",
     "cid_sintaxe_valida",
@@ -129,9 +137,11 @@ __all__ = [
     "construir_prompt_usuario_extracao",
     "detectar_divergencias",
     "exportar_json_schemas_a1",
+    "extrair_atestado_via_llm",
     "gerar_mensagem_confirmacao_extracao",
     "mesclar_atestado_confirmado",
     "nomes_compativeis",
+    "obter_cliente_llm",
     "obter_config_a1",
     "processar_arquivo_atestado",
     "validar_dados_confirmados",
