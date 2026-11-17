@@ -3,6 +3,8 @@ from sinergia.rag.limpeza import (
     remover_cabecalhos_rodapes,
     deshifenizar,
     normalizar_espacos_e_controles,
+    normalizar_ligaturas,
+    limpar_artefatos_marcacao_pdf,
     preservar_marcadores_juridicos,
     sanitizar_texto,
 )
@@ -67,6 +69,25 @@ class TestLimpezaTextual(unittest.TestCase):
         self.assertIn("obrigatória", sanitizado)
         self.assertIn("Art. 168", sanitizado)
         self.assertIn("§ 1º", sanitizado)
+
+    def test_normalizar_ligaturas_preservando_ordinais(self):
+        texto = "Grati\ufb01ca\u00e7\u00e3o do 13\u00ba Sal\u00e1rio, \ufb01lhos, justi\ufb01cada e con\ufb02ito na 1\u00aa parcela."
+        limpo = normalizar_ligaturas(texto)
+        self.assertEqual(
+            limpo,
+            "Gratificação do 13º Salário, filhos, justificada e conflito na 1ª parcela.",
+        )
+
+    def test_limpar_artefatos_marcacao_pdf(self):
+        texto = (
+            "# **NORMA REGULAMENTADORA**_Ministério do Trabalho\n"
+            "<mark>Fonte: CLT (OFICIAL)</mark> e <mark>NR-6</mark>"
+        )
+        limpo = sanitizar_texto(texto)
+        self.assertNotIn("<mark>", limpo)
+        self.assertNotIn("</mark>", limpo)
+        self.assertNotIn("Ministério do Trabalho", limpo)
+        self.assertIn("Fonte: CLT (OFICIAL) e NR-6", limpo)
 
 
 if __name__ == "__main__":
