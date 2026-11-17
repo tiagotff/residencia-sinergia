@@ -16,7 +16,7 @@ from sinergia.rag.tools import (
 )
 
 CAMINHO_MOCKS = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "data", "mocks")
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "rag", "mocks")
 )
 
 

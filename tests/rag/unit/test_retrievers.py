@@ -1,7 +1,12 @@
 import unittest
 from unittest.mock import MagicMock, patch
-from sinergia.rag.interfaces import MetadadosTrecho, TrechoRecuperado, ContextoRAG
-from sinergia.rag.retrievers import calcular_rrf, BuscadorHibrido
+from sinergia.rag.interfaces import (
+    ContextoRAG,
+    MetadadosTrecho,
+    ResultadoBuscaInstrumentada,
+    TrechoRecuperado,
+)
+from sinergia.rag.retrievers import BuscadorHibrido, calcular_rrf, calcular_rrf_detalhado
 
 
 class TestRetrievers(unittest.TestCase):
@@ -189,6 +194,76 @@ class TestRetrievers(unittest.TestCase):
         for t in contexto.trechos:
             self.assertIsNotNone(t.score)
             self.assertGreater(t.score, 0.0)
+
+    def test_calcular_rrf_detalhado_preserva_ranks_e_scores(self):
+        t1 = TrechoRecuperado(id_trecho=1, conteudo="A", score=0.91, metadados=self.meta_a)
+        t2 = TrechoRecuperado(id_trecho=2, conteudo="B", score=0.75, metadados=self.meta_b)
+        t3_lex = TrechoRecuperado(id_trecho=3, conteudo="C", score=0.88, metadados=self.meta_c)
+        t1_lex = TrechoRecuperado(id_trecho=1, conteudo="A", score=0.62, metadados=self.meta_a)
+
+        trechos, detalhes = calcular_rrf_detalhado(
+            densos=[t1, t2],
+            lexicos=[t3_lex, t1_lex],
+            k=60,
+            top_k=4,
+        )
+
+        self.assertEqual(len(trechos), 3)
+        self.assertEqual(len(detalhes), 3)
+        primeiro = detalhes[0]
+        self.assertEqual(primeiro.id_trecho, 1)
+        self.assertAlmostEqual(primeiro.dense_score, 0.91)
+        self.assertEqual(primeiro.dense_rank, 1)
+        self.assertAlmostEqual(primeiro.lex_score, 0.62)
+        self.assertEqual(primeiro.lex_rank, 2)
+        self.assertAlmostEqual(primeiro.rrf_score, (1.0 / 61) + (1.0 / 62), places=6)
+
+        somente_lex = [d for d in detalhes if d.id_trecho == 3][0]
+        self.assertIsNone(somente_lex.dense_rank)
+        self.assertEqual(somente_lex.lex_rank, 1)
+        self.assertAlmostEqual(somente_lex.lex_score, 0.88)
+
+    @patch.object(BuscadorHibrido, "_buscar_banco", return_value=None)
+    def test_buscar_com_telemetria(self, mock_buscar_banco):
+        mock_embedding = MagicMock()
+        mock_embedding.model_name = "tardellirs/colibri-embed-ptbr"
+        vetor_teste = [0.02 if i % 2 == 0 else -0.01 for i in range(768)]
+        mock_embedding.gerar_embedding.return_value = vetor_teste
+
+        buscador = BuscadorHibrido(gerador_embeddings=mock_embedding)
+        item = TrechoRecuperado(
+            id_trecho=42,
+            conteudo="Pausa de 10 minutos para digitação contínua na NR-17.",
+            metadados=MetadadosTrecho(
+                titulo="NR-17 Ergonomia",
+                fonte="Portaria MTP nº 423",
+                versao="2024.1",
+                secao="Item 17.6.4",
+                pagina=4,
+                id_base=1,
+                vigente=True,
+            ),
+        )
+        buscador.adicionar_trechos_memoria([item])
+
+        resultado = buscador.buscar_com_telemetria(
+            query="pausa digitação NR-17", id_base=1, limite=4
+        )
+
+        self.assertIsInstance(resultado, ResultadoBuscaInstrumentada)
+        self.assertGreaterEqual(resultado.embed_ms, 0.0)
+        self.assertGreaterEqual(resultado.db_rrf_ms, 0.0)
+        self.assertEqual(resultado.estatisticas_embedding.dimensoes, 768)
+        self.assertEqual(len(resultado.estatisticas_embedding.amostra), 12)
+        self.assertEqual(len(resultado.estatisticas_embedding.vetor), 768)
+        self.assertGreater(resultado.estatisticas_embedding.norma_l2, 0.0)
+        self.assertEqual(len(resultado.detalhes_trechos), 1)
+        det = resultado.detalhes_trechos[0]
+        self.assertEqual(det.id_trecho, 42)
+        self.assertEqual(det.dense_rank, 1)
+        self.assertEqual(det.lex_rank, 1)
+        self.assertGreater(det.rrf_score, 0.0)
+
 
 
 if __name__ == "__main__":
