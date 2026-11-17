@@ -1,0 +1,25 @@
+{
+  "protocolo": "sinergia/1",
+  "id_mensagem": "t-311-04",
+  "tipo": "TAREFA",
+  "acao": "a1.registrar_baixa_fisica",
+  "origem": "A0",
+  "destino": "A1",
+  "correlacao": {
+    "id_caso": 105,
+    "thread_id": "chat-42-105",
+    "id_tarefa": "t-311-04"
+  },
+  "contexto": {
+    "id_colaborador": 42,
+    "perfil": "rh",
+    "canal": "chat",
+    "data_hora": "2026-11-13T10:20:00-03:00"
+  },
+  "registro_inicial": null,
+  "payload": {
+    "id_atestado": 311,
+    "recebido_fisico_por": "rh.ana",
+    "recebido_fisico_em": "2026-11-13T10:20:00-03:00"
+  }
+}

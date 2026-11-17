@@ -18,3 +18,8 @@ Thumbs.db
 *.pth
 mlruns/
 !data/rag/.gitkeep
+
+# Docker
+.docker/
+docker-data/
+data/db/

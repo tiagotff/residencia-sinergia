@@ -1,0 +1,51 @@
+{
+  "protocolo": "sinergia/1",
+  "id_mensagem": "t-108-03",
+  "tipo": "TAREFA",
+  "acao": "a1.confirmar",
+  "origem": "A0",
+  "destino": "A1",
+  "correlacao": {
+    "id_caso": 108,
+    "thread_id": "chat-42-108",
+    "id_tarefa": "t-108-03"
+  },
+  "contexto": {
+    "id_colaborador": 42,
+    "perfil": "colaborador",
+    "canal": "chat",
+    "data_hora": "2026-11-09T09:20:00-03:00"
+  },
+  "registro_inicial": {
+    "id_caso": 108,
+    "thread_id": "chat-42-108",
+    "aberto_em": "2026-11-09T09:05:00-03:00",
+    "canal": "chat",
+    "id_colaborador": 42,
+    "nome": "Carla S.",
+    "matricula": "00123",
+    "id_area": 2,
+    "id_setor": 7,
+    "id_cargo": 15,
+    "jornada_inicio": "07:00",
+    "jornada_fim": "16:00",
+    "municipio": "Campinas",
+    "uf": "SP",
+    "tipo_solicitacao": "atestado_medico",
+    "inicio_informado": "2026-11-09",
+    "dias_informados": 5,
+    "tem_documento": true
+  },
+  "payload": {
+    "atestado_confirmado": {
+      "periodo": {
+        "inicio": "2026-11-11",
+        "fim": "2026-11-09"
+      },
+      "data_emissao": "2026-11-09"
+    },
+    "campos_corrigidos": [
+      "periodo.fim"
+    ]
+  }
+}
