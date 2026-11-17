@@ -185,7 +185,7 @@ sequenceDiagram
 #### 🔹 Frente 1A: Módulo de OCR, Prompts e Extração/Conversação com LLM
 *Arquivos: `ocr.py`, `prompts.py`, `extrator_llm.py`*
 
-- [ ] **Task 1A.1 — Leitura de Arquivo Privado e OCR (`ocr.py`):**
+- [x] **Task 1A.1 — Leitura de Arquivo Privado e OCR (`ocr.py`):**
   - Implementar `processar_arquivo_atestado(arquivo_uri: str, mime: str | None = None, sha256_esperado: str | None = None)`:
     - Ler a imagem (`.png`, `.jpg`) ou `.pdf` a partir do `arquivo_uri` no armazenamento privado.
     - Calcular/conferir o hash `sha256` do arquivo.

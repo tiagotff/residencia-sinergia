@@ -58,6 +58,7 @@ from sinergia.agentes.a1_recepcao.validador import (
     nomes_compativeis,
     validar_dados_confirmados,
 )
+from sinergia.agentes.a1_recepcao.ocr import processar_arquivo_atestado
 
 __all__ = [
     "CONSELHOS_ACEITOS_PADRAO",
@@ -113,4 +114,5 @@ __all__ = [
     "nomes_compativeis",
     "obter_config_a1",
     "validar_dados_confirmados",
+    "processar_arquivo_atestado",
 ]
