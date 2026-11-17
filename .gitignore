@@ -17,7 +17,6 @@ Thumbs.db
 *.pt
 *.pth
 mlruns/
-data/rag/**/*.pdf
 !data/rag/.gitkeep
 
 # Docker
