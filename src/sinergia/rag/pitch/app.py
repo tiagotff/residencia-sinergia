@@ -69,7 +69,9 @@ def _banco_disponivel_com_dados(database_url: str) -> bool:
         return False
 
 
-def carregar_trechos_fallback_mocks(diretorio_mocks: Path | None = None) -> list[TrechoRecuperado]:
+def carregar_trechos_fallback_mocks(
+    diretorio_mocks: Path | None = None,
+) -> list[TrechoRecuperado]:
     """Carrega os documentos PDF de mocks em objetos TrechoRecuperado para busca em memória."""
     pasta = diretorio_mocks or DIRETORIO_MOCKS
     trechos: list[TrechoRecuperado] = []
@@ -87,12 +89,14 @@ def carregar_trechos_fallback_mocks(diretorio_mocks: Path | None = None) -> list
             )
             for chunk in chunks:
                 secao = (
-                    chunk.metadados.get("secoes_map", {}).get("h1")
+                    chunk.secao
+                    or chunk.metadados.get("secao")
                     or (
                         chunk.metadados.get("hierarquia", [None])[-1]
                         if chunk.metadados.get("hierarquia")
                         else None
                     )
+                    or chunk.metadados.get("secoes_map", {}).get("h1")
                 )
                 trechos.append(
                     TrechoRecuperado(
@@ -115,12 +119,13 @@ def carregar_trechos_fallback_mocks(diretorio_mocks: Path | None = None) -> list
                 )
                 proximo_id += 1
 
-    if not trechos:
-        # Fallback mínimo sintético caso o diretório de PDFs não esteja disponível
-        for id_base, info in MAPA_BASES_FERRAMENTAS.items():
+    bases_presentes = {t.metadados.id_base for t in trechos}
+    for id_base, info in MAPA_BASES_FERRAMENTAS.items():
+        if id_base not in bases_presentes:
+            # Fallback mínimo sintético para bases sem PDF disponível no diretório
             trechos.append(
                 TrechoRecuperado(
-                    id_trecho=id_base,
+                    id_trecho=proximo_id,
                     conteudo=f"Documento normativo de referência para {info['nome']}: {info['descricao']}",
                     metadados=MetadadosTrecho(
                         id_documento=id_base,
@@ -136,6 +141,7 @@ def carregar_trechos_fallback_mocks(diretorio_mocks: Path | None = None) -> list
                     ),
                 )
             )
+            proximo_id += 1
 
     return trechos
 
@@ -201,7 +207,9 @@ def executar_turno_rag(
     historico: list[dict[str, str]] | None = None,
 ) -> TelemetriaTurno:
     """Executa roteamento autônomo ponderado, busca híbrida multi-base e geração na LLM ativa."""
-    historico_sessao = historico if historico is not None else obter_historico_chat_sessao()
+    historico_sessao = (
+        historico if historico is not None else obter_historico_chat_sessao()
+    )
 
     if ao_avancar_etapa:
         ao_avancar_etapa("Roteando pergunta autonomamente entre as bases F1..F5...")
@@ -210,7 +218,9 @@ def executar_turno_rag(
             pergunta, modelo=modelo_selecionado, historico=historico_sessao
         )
     except TypeError:
-        decisao = servico_llm.decidir_base_autonomamente(pergunta, modelo=modelo_selecionado)
+        decisao = servico_llm.decidir_base_autonomamente(
+            pergunta, modelo=modelo_selecionado
+        )
 
     chamadas = decisao.chamadas if decisao.usar_rag else []
     trechos_mesclados: list[TrechoRecuperado] = []
@@ -287,7 +297,9 @@ def executar_turno_rag(
         )
 
     citacoes_finais = resposta_llm.citacoes if decisao.usar_rag else []
-    total_ms = decisao.roteamento_ms + embed_ms_total + db_rrf_ms_total + resposta_llm.llm_ms
+    total_ms = (
+        decisao.roteamento_ms + embed_ms_total + db_rrf_ms_total + resposta_llm.llm_ms
+    )
     id_turno = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
 
@@ -326,7 +338,11 @@ def _obter_imagens_pdf_cache(
     )
 
 
-@st.dialog("Trecho no documento original (PDF)", width="large", icon=":material/picture_as_pdf:")
+@st.dialog(
+    "Trecho no documento original (PDF)",
+    width="large",
+    icon=":material/picture_as_pdf:",
+)
 def _abrir_modal_trecho_pdf(detalhe: DetalheScoreTrecho, indice_chunk: int = 1) -> None:
     """Exibe o trecho localizado no PDF original com highlight a partir da sua BBox."""
     meta = detalhe.metadados
@@ -364,16 +380,25 @@ def _abrir_modal_trecho_pdf(detalhe: DetalheScoreTrecho, indice_chunk: int = 1) 
         )
         st.caption(f"Arquivo: `{caminho_pdf.name}` · BBox: `{coords_str}`")
     else:
-        st.caption(f"Arquivo: `{caminho_pdf.name}` · Sem coordenadas BBox registradas para este trecho.")
+        st.caption(
+            f"Arquivo: `{caminho_pdf.name}` · Sem coordenadas BBox registradas para este trecho."
+        )
 
-    modo_visao = st.segmented_control(
-        "Modo de visualização",
-        options=["Recorte focado (BBox)", "Página inteira destacada", "Lado a lado"],
-        default="Recorte focado (BBox)",
-        required=True,
-        key=f"seg_visao_pdf_{detalhe.id_trecho}_{indice_chunk}",
-        label_visibility="collapsed",
-    ) or "Recorte focado (BBox)"
+    modo_visao = (
+        st.segmented_control(
+            "Modo de visualização",
+            options=[
+                "Recorte focado (BBox)",
+                "Página inteira destacada",
+                "Lado a lado",
+            ],
+            default="Recorte focado (BBox)",
+            required=True,
+            key=f"seg_visao_pdf_{detalhe.id_trecho}_{indice_chunk}",
+            label_visibility="collapsed",
+        )
+        or "Recorte focado (BBox)"
+    )
 
     if modo_visao == "Recorte focado (BBox)":
         st.image(
@@ -468,7 +493,9 @@ def _renderizar_visao_global(turnos: list[TelemetriaTurno]) -> None:
         for turno in reversed(turnos):
             rot = turno.roteamento
             tempo_s = turno.tempos.total_ms / 1000.0
-            rotulo = f"[{rot.codigos_combinados}] {turno.pergunta[:55]} · {tempo_s:.2f}s"
+            rotulo = (
+                f"[{rot.codigos_combinados}] {turno.pergunta[:55]} · {tempo_s:.2f}s"
+            )
             st.button(
                 rotulo,
                 key=f"history_btn_{turno.id_turno}",
@@ -498,7 +525,9 @@ def _renderizar_raio_x(turno: TelemetriaTurno) -> None:
         )
 
     t_cols = st.columns(4)
-    t_cols[0].html(renderizar_card_kpi("Total", f"{turno.tempos.total_ms / 1000.0:.2f} s"))
+    t_cols[0].html(
+        renderizar_card_kpi("Total", f"{turno.tempos.total_ms / 1000.0:.2f} s")
+    )
     t_cols[1].html(renderizar_card_kpi("Embedding", f"{turno.tempos.embed_ms:.1f} ms"))
     t_cols[2].html(renderizar_card_kpi("DB + RRF", f"{turno.tempos.db_rrf_ms:.1f} ms"))
     t_cols[3].html(renderizar_card_kpi("LLM", f"{turno.tempos.llm_ms / 1000.0:.2f} s"))
@@ -530,16 +559,22 @@ def _renderizar_raio_x(turno: TelemetriaTurno) -> None:
                     ):
                         _abrir_modal_trecho_pdf(det, idx)
                 c1, c2 = st.columns(2)
-                dense_rank_str = f"#{det.dense_rank}" if det.dense_rank is not None else "N/A"
+                dense_rank_str = (
+                    f"#{det.dense_rank}" if det.dense_rank is not None else "N/A"
+                )
                 lex_rank_str = f"#{det.lex_rank}" if det.lex_rank is not None else "N/A"
                 c1.html(
                     renderizar_card_kpi(
-                        "Denso (Cosseno)", f"{det.dense_score:.4f}", f"Rank: {dense_rank_str}"
+                        "Denso (Cosseno)",
+                        f"{det.dense_score:.4f}",
+                        f"Rank: {dense_rank_str}",
                     )
                 )
                 c2.html(
                     renderizar_card_kpi(
-                        "Léxico (ts_rank)", f"{det.lex_score:.4f}", f"Rank: {lex_rank_str}"
+                        "Léxico (ts_rank)",
+                        f"{det.lex_score:.4f}",
+                        f"Rank: {lex_rank_str}",
                     )
                 )
                 st.text(det.conteudo)
@@ -552,7 +587,9 @@ def _renderizar_raio_x(turno: TelemetriaTurno) -> None:
             e1.html(renderizar_card_kpi("Modelo", emb.modelo))
             e2.html(
                 renderizar_card_kpi(
-                    "Dimensões / Norma L2", f"{emb.dimensoes}d", f"||v|| = {emb.norma_l2:.4f}"
+                    "Dimensões / Norma L2",
+                    f"{emb.dimensoes}d",
+                    f"||v|| = {emb.norma_l2:.4f}",
                 )
             )
             s1, s2, s3 = st.columns(3)
@@ -582,7 +619,9 @@ def _renderizar_raio_x(turno: TelemetriaTurno) -> None:
                     "vigente": meta.vigente,
                     "extra": meta.extra,
                 }
-                st.code(json.dumps(linhagem, ensure_ascii=False, indent=2), language="json")
+                st.code(
+                    json.dumps(linhagem, ensure_ascii=False, indent=2), language="json"
+                )
 
     with aba_tool:
         ol = turno.metricas_ollama
@@ -612,8 +651,12 @@ def _renderizar_raio_x(turno: TelemetriaTurno) -> None:
             m1.html(renderizar_card_kpi("prompt_tokens", str(ol.prompt_eval_count)))
             m2.html(renderizar_card_kpi("eval_tokens", str(ol.eval_count)))
             m3, m4 = st.columns(2)
-            m3.html(renderizar_card_kpi("velocidade", f"{ol.tokens_por_segundo:.1f} tok/s"))
-            m4.html(renderizar_card_kpi("load_duration", f"{ol.load_duration_ms:.1f} ms"))
+            m3.html(
+                renderizar_card_kpi("velocidade", f"{ol.tokens_por_segundo:.1f} tok/s")
+            )
+            m4.html(
+                renderizar_card_kpi("load_duration", f"{ol.load_duration_ms:.1f} ms")
+            )
             st.markdown("**Prompt formatado enviado à LLM**")
             st.code(turno.prompt_enviado, language="markdown")
 
@@ -674,7 +717,11 @@ col_chat, col_panel = st.columns([7, 5], gap="large")
 
 with col_panel:
     turno_selecionado: TelemetriaTurno | None = next(
-        (t for t in st.session_state.turnos if t.id_turno == st.session_state.selected_msg_id),
+        (
+            t
+            for t in st.session_state.turnos
+            if t.id_turno == st.session_state.selected_msg_id
+        ),
         None,
     )
     if turno_selecionado is None:
@@ -705,7 +752,10 @@ with col_chat:
                     if is_selected
                     else f"chat_resp_card_{turno.id_turno}_{idx_msg}"
                 )
-                with st.chat_message("assistant"), st.container(border=True, key=card_key):
+                with (
+                    st.chat_message("assistant"),
+                    st.container(border=True, key=card_key),
+                ):
                     c_badge, c_btn = st.columns([3, 1], vertical_alignment="center")
                     with c_badge:
                         st.html(
@@ -725,7 +775,9 @@ with col_chat:
                         )
 
                     if turno.reasoning:
-                        with st.expander("Raciocínio do modelo", icon=":material/psychology:"):
+                        with st.expander(
+                            "Raciocínio do modelo", icon=":material/psychology:"
+                        ):
                             st.markdown(turno.reasoning)
                     st.markdown(turno.resposta)
                     st.caption(
@@ -736,8 +788,12 @@ with col_chat:
                     if turno.detalhes_trechos:
                         st.caption("Abrir trecho no PDF original (BBox):")
                         with st.container(horizontal=True):
-                            for idx_t, det in enumerate(turno.detalhes_trechos, start=1):
-                                secao_curta = det.metadados.secao or det.metadados.titulo
+                            for idx_t, det in enumerate(
+                                turno.detalhes_trechos, start=1
+                            ):
+                                secao_curta = (
+                                    det.metadados.secao or det.metadados.titulo
+                                )
                                 if len(secao_curta) > 28:
                                     secao_curta = f"{secao_curta[:25]}..."
                                 pag_str = (
@@ -757,11 +813,14 @@ with col_chat:
             with st.chat_message("user"):
                 st.write(prompt_ativo)
 
-            with st.chat_message("assistant"), st.status(
-                ":shimmer[Consultando bases e gerando resposta...]",
-                expanded=True,
-                state="running",
-            ) as status_box:
+            with (
+                st.chat_message("assistant"),
+                st.status(
+                    ":shimmer[Consultando bases e gerando resposta...]",
+                    expanded=True,
+                    state="running",
+                ) as status_box,
+            ):
                 etapas_placeholder = st.container()
                 reasoning_placeholder = st.empty()
                 resposta_placeholder = st.empty()
@@ -810,7 +869,9 @@ with col_chat:
                         st.markdown(turno_novo.reasoning)
                 if turno_novo.resposta:
                     resposta_placeholder.markdown(turno_novo.resposta)
-                status_box.update(label="Resposta gerada", state="complete", expanded=False)
+                status_box.update(
+                    label="Resposta gerada", state="complete", expanded=False
+                )
 
             st.session_state.turnos.append(turno_novo)
             st.session_state.messages.append(

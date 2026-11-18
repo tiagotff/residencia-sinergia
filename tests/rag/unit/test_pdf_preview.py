@@ -64,19 +64,19 @@ def test_extrair_bboxes_trecho_coordenadas_e_bboxes() -> None:
 
 
 def test_renderizar_visualizacao_trecho_pdf_real() -> None:
-    """Renderiza recorte e página inteira de um chunk real da NR-17 com assinatura PNG válida."""
-    pdf_nr17 = DIRETORIO_MOCKS / "base1_nr17_ergonomia.pdf"
-    chunks = chunking_documento_pdf(str(pdf_nr17), "NR-17 Ergonomia")
-    assert chunks, "Esperava chunks extraídos da NR-17"
+    """Renderiza recorte e página inteira de um chunk real de rag_ergonomia.pdf com assinatura PNG válida."""
+    pdf_ergonomia = DIRETORIO_MOCKS / "rag_ergonomia.pdf"
+    chunks = chunking_documento_pdf(str(pdf_ergonomia))
+    assert chunks, "Esperava chunks extraídos de rag_ergonomia.pdf"
 
     chunk_com_bbox = next(
         (c for c in chunks if c.metadados.get("coordenadas")),
         chunks[0],
     )
     meta = MetadadosTrecho(
-        titulo="NR-17 Ergonomia",
-        fonte="Portaria MTP nº 423",
-        versao="2024.1",
+        titulo="Base de Conhecimento RH: Pausas e Ergonomia",
+        fonte="Recursos Humanos e Segurança do Trabalho (RH/TST) — SinergIA; NR-17 (Ergonomia)",
+        versao="2.0",
         pagina=chunk_com_bbox.pagina,
         id_base=1,
         extra=chunk_com_bbox.metadados,
@@ -84,7 +84,7 @@ def test_renderizar_visualizacao_trecho_pdf_real() -> None:
 
     vis = renderizar_visualizacao_trecho(meta, diretorio_mocks=DIRETORIO_MOCKS)
     assert vis is not None
-    assert vis.nome_arquivo == "base1_nr17_ergonomia.pdf"
+    assert vis.nome_arquivo == "rag_ergonomia.pdf"
     assert vis.pagina >= 1
     assert vis.total_paginas >= 1
     assert vis.bboxes

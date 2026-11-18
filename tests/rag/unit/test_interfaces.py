@@ -3,6 +3,7 @@ from sinergia.rag.interfaces import (
     ContextoRAG,
     DetalheScoreTrecho,
     EstatisticasEmbedding,
+    MetadadosCabecalhoKB,
     MetadadosTrecho,
     ResultadoBuscaInstrumentada,
     TrechoRecuperado,
@@ -175,6 +176,36 @@ class TestInterfacesRAG(unittest.TestCase):
         self.assertEqual(dumped["detalhes_trechos"][0]["lex_rank"], 1)
         self.assertAlmostEqual(dumped["detalhes_trechos"][0]["rrf_score"], 0.0328)
         self.assertEqual(dumped["contexto"]["total_encontrado"], 1)
+
+    def test_metadados_cabecalho_kb_e_formatar_prompt_qa(self):
+        cab = MetadadosCabecalhoKB(
+            titulo="Base de Conhecimento EPI",
+            versao="1.2",
+            tipo_fonte="INTERNO",
+            fonte="NR-6",
+        )
+        self.assertEqual(cab.titulo, "Base de Conhecimento EPI")
+
+        meta = MetadadosTrecho(
+            titulo="Base de Conhecimento EPI",
+            fonte="NR-6",
+            versao="1.2",
+            secao="EPI-Q001 | O que é EPI?",
+            pagina=1,
+            extra={
+                "id_pergunta": "EPI-Q001",
+                "fonte_item": "NR-6 (OFICIAL)",
+            },
+        )
+        ctx = ContextoRAG(
+            query="o que e EPI",
+            id_base=5,
+            trechos=[TrechoRecuperado(conteudo="Dispositivo de uso individual.", score=0.033, metadados=meta)],
+            total_encontrado=1,
+        )
+        prompt = ctx.formatar_para_prompt()
+        self.assertIn("- ID Pergunta: EPI-Q001", prompt)
+        self.assertIn("- Fonte do Trecho: NR-6 (OFICIAL)", prompt)
 
 
 if __name__ == "__main__":

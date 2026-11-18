@@ -1,4 +1,4 @@
-"""Pipeline de sanitização e limpeza textual em 4 estágios para documentos RAG."""
+"""Pipeline de sanitização e limpeza textual para documentos RAG."""
 
 import re
 import unicodedata
@@ -21,12 +21,43 @@ PADRAO_HIFEN_QUEBRA = re.compile(
 # Padrão para caracteres de controle indesejados (form feed, null bytes, backspaces)
 PADRAO_CONTROLE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
-# TODO: Adicionar regex/regras para limpar metadados de cabeçalho ministerial e carimbos no início do PDF.
-# Exemplo problemático vindo do banco/embedding:
-# "# **NORMA REGULAMENTADORA N. 17 - ERGONOMIA**_Ministério do Trabalho e Emprego_Secretaria de Inspeção do Trabalho - Departamento de Segurança e Saúde no Trabalho"
-# FIXME: Criar função especializada (ex: `limpar_cabecalho_ministerial_pdf` ou `limpar_inicio_documento`)
-# para remover ou separar linhas repetitivas institucionais (Ministério do Trabalho, Secretarias, Departamentos)
-# antes de gerar o embedding e salvar o conteúdo puro do chunk.
+# Tags de marcação HTML injetadas por extratores externos (ex: PyMuPDF4LLM/to_chunks)
+PADRAO_TAGS_MARK = re.compile(r"</?mark>", re.IGNORECASE)
+
+# Cabeçalhos ministeriais/institucionais grudados em títulos via sublinhado Markdown
+PADRAO_CABECALHO_MINISTERIAL = re.compile(
+    r"_+(?:Minist[eé]rio|Secretaria|Departamento|Coordena[çc][ãa]o)[^\n]*",
+    re.IGNORECASE,
+)
+
+# Tabela de conversão de ligaturas tipográficas comuns em PDFs (preservando º e ª)
+TABELA_LIGATURAS = str.maketrans(
+    {
+        "\ufb00": "ff",
+        "\ufb01": "fi",
+        "\ufb02": "fl",
+        "\ufb03": "ffi",
+        "\ufb04": "ffl",
+        "\ufb05": "ft",
+        "\ufb06": "st",
+    }
+)
+
+
+def normalizar_ligaturas(texto: str) -> str:
+    """Converte ligaturas tipográficas Unicode (ﬁ, ﬂ, etc.) preservando ordinais (º, ª)."""
+    if not texto:
+        return ""
+    return unicodedata.normalize("NFC", texto.translate(TABELA_LIGATURAS))
+
+
+def limpar_artefatos_marcacao_pdf(texto: str) -> str:
+    """Remove tags HTML de marcação (<mark>) e cabeçalhos institucionais grudados."""
+    if not texto:
+        return ""
+    texto = PADRAO_TAGS_MARK.sub("", texto)
+    texto = PADRAO_CABECALHO_MINISTERIAL.sub("", texto)
+    return texto
 
 
 def remover_cabecalhos_rodapes(texto: str) -> str:
@@ -47,12 +78,12 @@ def deshifenizar(texto: str) -> str:
 
 
 def normalizar_espacos_e_controles(texto: str) -> str:
-    """Estágio 3: Remove caracteres de controle nulos e normaliza espaços múltiplos."""
+    """Estágio 3: Remove caracteres de controle, desfaz ligaturas e normaliza espaços."""
     # Remover caracteres de controle nulos e form feed
     texto = PADRAO_CONTROLE.sub(" ", texto)
 
-    # Normalização de unicode (NFC)
-    texto = unicodedata.normalize("NFC", texto)
+    # Desfazer ligaturas tipográficas (ﬁ -> fi, ﬂ -> fl) mantendo ordinais (13º, 1ª) e NFC
+    texto = normalizar_ligaturas(texto)
 
     # Normalizar quebras de linha Windows para Unix
     texto = texto.replace("\r\n", "\n").replace("\r", "\n")
@@ -84,13 +115,12 @@ def preservar_marcadores_juridicos(texto: str) -> str:
 
 
 def sanitizar_texto(texto: str) -> str:
-    """Executa o pipeline completo de limpeza textual nos 4 estágios."""
+    """Executa o pipeline completo de limpeza textual para documentos RAG."""
     if not texto:
         return ""
 
-    # TODO: Integrar estágio de limpeza de cabeçalho inicial de órgãos/ministérios aqui.
-    # Ex: t0 = limpar_inicio_documento(texto)
-    t1 = remover_cabecalhos_rodapes(texto)
+    t0 = limpar_artefatos_marcacao_pdf(texto)
+    t1 = remover_cabecalhos_rodapes(t0)
     t2 = deshifenizar(t1)
     t3 = normalizar_espacos_e_controles(t2)
     t4 = preservar_marcadores_juridicos(t3)
