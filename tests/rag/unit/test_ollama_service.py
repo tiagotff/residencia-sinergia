@@ -6,14 +6,14 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 
-from sinergia.rag.interfaces import ContextoRAG, MetadadosTrecho, TrechoRecuperado
-from sinergia.rag.pitch.ollama_service import (
+from sinergia.chat_demo.ollama_service import (
     PRESETS_MODELOS_GROQ,
     PRESETS_MODELOS_LOCAL,
     GroqPitchService,
     OllamaPitchService,
     verificar_guardrail_conversacional,
 )
+from sinergia.rag.interfaces import ContextoRAG, MetadadosTrecho, TrechoRecuperado
 
 
 def _mock_response(payload: dict, status_code: int = 200) -> MagicMock:
@@ -39,7 +39,7 @@ class TestOllamaPitchService(unittest.TestCase):
     def setUp(self):
         self.service = OllamaPitchService(base_url="http://localhost:11434")
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
+    @patch("sinergia.chat_demo.ollama_service.httpx.get")
     def test_listar_modelos_disponiveis_filtra_embedding(self, mock_get):
         mock_get.return_value = _mock_response(
             {
@@ -54,8 +54,8 @@ class TestOllamaPitchService(unittest.TestCase):
         modelos = self.service.listar_modelos_disponiveis()
         self.assertEqual(modelos, ["qwen2.5:3b", "qwen3.5:4b"])
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
-    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
+    @patch("sinergia.chat_demo.ollama_service.httpx.post")
+    @patch("sinergia.chat_demo.ollama_service.httpx.get")
     def test_roteamento_autonomo_via_tool_calling(self, mock_get, mock_post):
         mock_get.return_value = _mock_response({"models": [{"name": "qwen2.5:3b"}]})
         mock_post.return_value = _mock_response(
@@ -82,8 +82,8 @@ class TestOllamaPitchService(unittest.TestCase):
         self.assertEqual(decisao.query_busca, "CA 12345 luva nitrílica")
         self.assertEqual(decisao.modo_roteamento, "tool_calling")
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
-    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
+    @patch("sinergia.chat_demo.ollama_service.httpx.post")
+    @patch("sinergia.chat_demo.ollama_service.httpx.get")
     def test_roteamento_autonomo_fallback_json_estruturado(self, mock_get, mock_post):
         mock_get.return_value = _mock_response({"models": [{"name": "llama3.2:1b"}]})
         # 1ª chamada (tool calling) não retorna tool_calls; 2ª chamada (JSON) retorna id_base=2
@@ -106,8 +106,8 @@ class TestOllamaPitchService(unittest.TestCase):
         self.assertEqual(decisao.query_busca, "falta casamento Art 473 CLT")
         self.assertEqual(decisao.modo_roteamento, "json_fallback")
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.stream")
-    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
+    @patch("sinergia.chat_demo.ollama_service.httpx.stream")
+    @patch("sinergia.chat_demo.ollama_service.httpx.get")
     def test_gerar_resposta_fundamentada_extrai_metricas_nativas(self, mock_get, mock_stream):
         mock_get.return_value = _mock_response({"models": [{"name": "qwen2.5:3b"}]})
         mock_stream.return_value = _mock_stream_response(
@@ -166,7 +166,7 @@ class TestOllamaPitchService(unittest.TestCase):
         self.assertAlmostEqual(resultado.metricas.tokens_por_segundo, 64.0)
         self.assertIn("NR-17 Ergonomia", resultado.prompt_enviado)
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
+    @patch("sinergia.chat_demo.ollama_service.httpx.get")
     def test_presets_local_e_merge_com_instalados(self, mock_get):
         self.assertEqual(len(PRESETS_MODELOS_LOCAL), 5)
         joined = " ".join(PRESETS_MODELOS_LOCAL).lower()
@@ -183,8 +183,8 @@ class TestOllamaPitchService(unittest.TestCase):
         self.assertTrue(self.service.modelo_esta_instalado("qwen2.5:3b"))
         self.assertFalse(self.service.modelo_esta_instalado("mimo-v2.6:9b-thinking"))
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
-    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
+    @patch("sinergia.chat_demo.ollama_service.httpx.post")
+    @patch("sinergia.chat_demo.ollama_service.httpx.get")
     def test_roteamento_multi_tool_com_pesos_e_alocacao_proporcional(self, mock_get, mock_post):
         mock_get.return_value = _mock_response({"models": [{"name": "qwen2.5:3b"}]})
         mock_post.return_value = _mock_response(
@@ -224,8 +224,8 @@ class TestOllamaPitchService(unittest.TestCase):
         self.assertAlmostEqual(decisao.chamadas[1].peso, 0.25)
         self.assertEqual(decisao.chamadas[1].limite_trechos, 2)
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
-    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
+    @patch("sinergia.chat_demo.ollama_service.httpx.post")
+    @patch("sinergia.chat_demo.ollama_service.httpx.get")
     def test_roteamento_via_ferramenta_busca_multiplas_bases(self, mock_get, mock_post):
         mock_get.return_value = _mock_response({"models": [{"name": "qwen2.5:3b"}]})
         mock_post.return_value = _mock_response(
@@ -261,8 +261,8 @@ class TestOllamaPitchService(unittest.TestCase):
         self.assertEqual(decisao.chamadas[1].tool_name, "ferramenta_busca_epis")
         self.assertEqual(decisao.chamadas[1].limite_trechos, 2)
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
-    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
+    @patch("sinergia.chat_demo.ollama_service.httpx.post")
+    @patch("sinergia.chat_demo.ollama_service.httpx.get")
     def test_roteamento_multi_base_json_fallback_e_heuristica(self, mock_get, mock_post):
         mock_get.return_value = _mock_response({"models": [{"name": "llama3.2:1b"}]})
         mock_post.side_effect = [
@@ -306,7 +306,7 @@ class TestGroqPitchService(unittest.TestCase):
     def setUp(self):
         self.groq = GroqPitchService(api_key="gsk_test_fake_key")
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
+    @patch("sinergia.chat_demo.ollama_service.httpx.get")
     def test_listar_modelos_groq_filtra_audio_e_guard(self, mock_get):
         mock_get.return_value = _mock_response(
             {
@@ -335,7 +335,7 @@ class TestGroqPitchService(unittest.TestCase):
         for preset in PRESETS_MODELOS_GROQ:
             self.assertIn(preset, com_presets)
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
+    @patch("sinergia.chat_demo.ollama_service.httpx.get")
     def test_selecionar_modelo_ativo_nunca_sobrescreve_escolha_explicita_com_modelo_padrao(
         self, mock_get
     ):
@@ -354,9 +354,9 @@ class TestGroqPitchService(unittest.TestCase):
             "llama-3.1-8b-instant",
         )
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.stream")
-    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
-    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
+    @patch("sinergia.chat_demo.ollama_service.httpx.stream")
+    @patch("sinergia.chat_demo.ollama_service.httpx.post")
+    @patch("sinergia.chat_demo.ollama_service.httpx.get")
     def test_groq_roteamento_e_geracao_com_metricas(self, mock_get, mock_post, mock_stream):
         mock_get.return_value = _mock_response(
             {"data": [{"id": "qwen/qwen3.8-27b"}, {"id": "openai/gpt-oss-20b"}]}
@@ -448,7 +448,7 @@ class TestGroqPitchService(unittest.TestCase):
         self.assertAlmostEqual(resp.metricas.load_duration_ms, 50.0)
         self.assertAlmostEqual(resp.metricas.tokens_por_segundo, 300.0)
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
+    @patch("sinergia.chat_demo.ollama_service.httpx.post")
     def test_guardrail_conversacional_bloqueia_saudacoes_e_termos_soltos(self, mock_post):
         for msg in ("Olá", "Bom dia", "Oi, tudo bem?", "Obrigado!", "Bom dia, ergonomia", "Olá EPI"):
             self.assertTrue(verificar_guardrail_conversacional(msg), msg)
@@ -460,7 +460,7 @@ class TestGroqPitchService(unittest.TestCase):
             self.assertEqual(decisao.codigos_combinados, "CHAT")
         mock_post.assert_not_called()
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
+    @patch("sinergia.chat_demo.ollama_service.httpx.post")
     def test_guardrail_permite_saudacao_com_pergunta_de_dominio(self, mock_post):
         self.assertFalse(verificar_guardrail_conversacional("Bom dia, qual a pausa da NR-17?"))
         mock_post.return_value = _mock_response(
@@ -523,7 +523,7 @@ class TestGroqPitchService(unittest.TestCase):
         self.assertIn("NÃO cite nomes de arquivos PDF", sys_chat)
         self.assertNotIn("Fontes recuperadas no RAG", user_chat)
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.stream")
+    @patch("sinergia.chat_demo.ollama_service.httpx.stream")
     def test_historico_sessao_enviado_para_llm_e_roteamento_continuacao(self, mock_stream):
         historico = [
             {"role": "user", "content": "Bom dia, ergonomia"},
@@ -564,8 +564,8 @@ class TestGroqPitchService(unittest.TestCase):
         self.assertEqual(roles_enviadas, ["system", "user", "assistant", "user"])
         self.assertEqual(payload_enviado["messages"][1]["content"], "Bom dia, ergonomia")
 
-    @patch("sinergia.rag.pitch.ollama_service.time.sleep")
-    @patch("sinergia.rag.pitch.ollama_service.httpx.stream")
+    @patch("sinergia.chat_demo.ollama_service.time.sleep")
+    @patch("sinergia.chat_demo.ollama_service.httpx.stream")
     def test_groq_gerar_resposta_trata_erro_429_stream_fechado_sem_crash(
         self, mock_stream, mock_sleep
     ):

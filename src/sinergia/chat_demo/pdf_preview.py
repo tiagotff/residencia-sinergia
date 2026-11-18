@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sinergia.rag.ingestao import MAPA_MOCKS_PADRAO
 from sinergia.rag.interfaces import MetadadosTrecho
 
-DIRETORIO_MOCKS_PADRAO = Path(__file__).resolve().parents[4] / "data" / "rag" / "mocks"
+DIRETORIO_MOCKS_PADRAO = Path(__file__).resolve().parents[3] / "data" / "rag" / "mocks"
 
 
 class CoordenadaBBox(BaseModel):

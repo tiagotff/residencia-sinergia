@@ -2,20 +2,20 @@
 
 import unittest
 
-from sinergia.rag.interfaces import (
-    DetalheScoreTrecho,
-    EstatisticasEmbedding,
-    MetadadosTrecho,
-)
-from sinergia.rag.pitch.ollama_service import (
+from sinergia.chat_demo.ollama_service import (
     ChamadaFerramentaRAG,
     DecisaoRoteamento,
     MetricasOllama,
 )
-from sinergia.rag.pitch.telemetry import (
+from sinergia.chat_demo.telemetry import (
     TelemetriaTurno,
     TemposTurno,
     calcular_visao_global,
+)
+from sinergia.rag.interfaces import (
+    DetalheScoreTrecho,
+    EstatisticasEmbedding,
+    MetadadosTrecho,
 )
 
 

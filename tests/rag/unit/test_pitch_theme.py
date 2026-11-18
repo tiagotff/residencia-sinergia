@@ -2,8 +2,8 @@
 
 import unittest
 
-from sinergia.rag.pitch.ollama_service import DecisaoRoteamento
-from sinergia.rag.pitch.theme import (
+from sinergia.chat_demo.ollama_service import DecisaoRoteamento
+from sinergia.chat_demo.theme import (
     PALETA_MONOCROMATICA,
     obter_css_monocromatico_light,
     renderizar_badge_base,

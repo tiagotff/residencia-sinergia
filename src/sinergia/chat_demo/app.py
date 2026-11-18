@@ -3,34 +3,35 @@
 import json
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import streamlit as st
+from streamlit.runtime.scriptrunner_utils.script_run_context import (
+    add_script_run_ctx,
+    get_script_run_ctx,
+)
 
-from sinergia.rag.chunking import chunking_documento_pdf
-from sinergia.rag.ingestao import MAPA_MOCKS_PADRAO, mapear_mock_para_metadados
-from sinergia.rag.interfaces import (
-    ContextoRAG,
-    DetalheScoreTrecho,
-    EstatisticasEmbedding,
-    MetadadosTrecho,
-    TrechoRecuperado,
-)
-from sinergia.rag.pitch.ollama_service import (
+from sinergia.agentes.a2_bem_estar import executar_com_telemetria
+from sinergia.chat_demo.ollama_service import (
     MAPA_BASES_FERRAMENTAS,
+    ChamadaFerramentaRAG,
+    DecisaoRoteamento,
     GroqPitchService,
+    MetricasOllama,
 )
-from sinergia.rag.pitch.pdf_preview import (
+from sinergia.chat_demo.pdf_preview import (
     extrair_bboxes_trecho,
     renderizar_bboxes_em_pdf_bytes,
     resolver_caminho_pdf,
 )
-from sinergia.rag.pitch.telemetry import (
+from sinergia.chat_demo.telemetry import (
     TelemetriaTurno,
     TemposTurno,
     calcular_visao_global,
 )
-from sinergia.rag.pitch.theme import (
+from sinergia.chat_demo.theme import (
     aplicar_tema_monocromatico,
     renderizar_badges_roteamento,
     renderizar_barra_distribuicao,
@@ -38,9 +39,17 @@ from sinergia.rag.pitch.theme import (
     renderizar_citacoes_html,
     renderizar_grafico_embedding_html,
 )
+from sinergia.rag.chunking import chunking_documento_pdf
+from sinergia.rag.ingestao import MAPA_MOCKS_PADRAO, mapear_mock_para_metadados
+from sinergia.rag.interfaces import (
+    DetalheScoreTrecho,
+    EstatisticasEmbedding,
+    MetadadosTrecho,
+    TrechoRecuperado,
+)
 from sinergia.rag.retrievers import BuscadorHibrido
 
-DIRETORIO_MOCKS = Path(__file__).resolve().parents[4] / "data" / "rag" / "mocks"
+DIRETORIO_MOCKS = Path(__file__).resolve().parents[3] / "data" / "rag" / "mocks"
 
 
 def _banco_disponivel_com_dados(database_url: str) -> bool:
@@ -206,121 +215,137 @@ def executar_turno_rag(
     ao_receber_conteudo: Callable[[str], None] | None = None,
     historico: list[dict[str, str]] | None = None,
 ) -> TelemetriaTurno:
-    """Executa roteamento autônomo ponderado, busca híbrida multi-base e geração na LLM ativa."""
+    """Despacha `a2.responder` ao Agente 2 (CrewAI + Groq) e consolida `TelemetriaTurno`."""
     historico_sessao = (
         historico if historico is not None else obter_historico_chat_sessao()
     )
+    id_turno = int(st.session_state.get("next_msg_id", 1))
+    st.session_state.next_msg_id = id_turno + 1
 
-    if ao_avancar_etapa:
-        ao_avancar_etapa("Roteando pergunta autonomamente entre as bases F1..F5...")
-    try:
-        decisao = servico_llm.decidir_base_autonomamente(
-            pergunta, modelo=modelo_selecionado, historico=historico_sessao
-        )
-    except TypeError:
-        decisao = servico_llm.decidir_base_autonomamente(
-            pergunta, modelo=modelo_selecionado
-        )
+    tarefa_a2 = {
+        "protocolo": "sinergia/1",
+        "id_mensagem": f"demo-turno-{id_turno}-{uuid4().hex[:8]}",
+        "tipo": "TAREFA",
+        "acao": "a2.responder",
+        "origem": "A0",
+        "destino": "A2",
+        "correlacao": {
+            "id_caso": None,
+            "thread_id": "chat-demo-sessao",
+            "id_tarefa": f"t-demo-{id_turno}",
+        },
+        "contexto": {
+            "id_colaborador": 42,
+            "perfil": "colaborador",
+            "canal": "chat",
+            "data_hora": datetime.now(tz=UTC).isoformat(),
+        },
+        "payload": {
+            "pergunta": pergunta,
+            "historico": historico_sessao,
+            "modelo": modelo_selecionado,
+        },
+    }
 
-    chamadas = decisao.chamadas if decisao.usar_rag else []
-    trechos_mesclados: list[TrechoRecuperado] = []
-    detalhes_mesclados: list[DetalheScoreTrecho] = []
-    embed_ms_total = 0.0
-    db_rrf_ms_total = 0.0
-    estatisticas_primarias: EstatisticasEmbedding | None = None
-
-    if decisao.usar_rag and chamadas:
-        for chamada in chamadas:
-            if ao_avancar_etapa:
-                if len(chamadas) == 1:
-                    ao_avancar_etapa(
-                        f"Buscando trechos na base **{chamada.codigo_base}** ({chamada.nome_base})..."
-                    )
-                else:
-                    ao_avancar_etapa(
-                        f"Buscando {chamada.limite_trechos} trecho(s) na base **{chamada.codigo_base}** "
-                        f"({chamada.nome_base} · peso {chamada.peso * 100:.0f}%)..."
-                    )
-            resultado_rag = buscador.buscar_com_telemetria(
-                query=chamada.query_busca,
-                id_base=chamada.id_base,
-                limite=chamada.limite_trechos,
-            )
-            trechos_mesclados.extend(resultado_rag.contexto.trechos)
-            detalhes_mesclados.extend(resultado_rag.detalhes_trechos)
-            embed_ms_total += resultado_rag.embed_ms
-            db_rrf_ms_total += resultado_rag.db_rrf_ms
-            if estatisticas_primarias is None:
-                estatisticas_primarias = resultado_rag.estatisticas_embedding
-
-    modelo_label = modelo_selecionado or "LLM ativa"
-    if decisao.usar_rag:
-        contexto_final = ContextoRAG(
-            query=decisao.query_busca,
-            id_base=decisao.id_base,
-            trechos=trechos_mesclados,
-            total_encontrado=len(trechos_mesclados),
-        )
-        estatisticas_finais = estatisticas_primarias or EstatisticasEmbedding()
-        if ao_avancar_etapa:
-            ao_avancar_etapa(f"Gerando resposta fundamentada com `{modelo_label}`...")
-    else:
-        contexto_final = ContextoRAG(
-            query=None,
-            id_base=None,
-            trechos=[],
-            total_encontrado=0,
-        )
-        estatisticas_finais = EstatisticasEmbedding(dimensoes=0, norma_l2=0.0)
-        if ao_avancar_etapa:
-            ao_avancar_etapa(
-                f"Respondendo ao colaborador com `{modelo_label}` (sem consulta documental)..."
-            )
-
-    try:
-        resposta_llm = servico_llm.gerar_resposta_fundamentada(
-            pergunta=pergunta,
-            contexto=contexto_final,
-            modelo=modelo_selecionado,
-            ao_receber_reasoning=ao_receber_reasoning,
-            ao_receber_conteudo=ao_receber_conteudo,
-            usar_rag=decisao.usar_rag,
-            historico=historico_sessao,
-        )
-    except TypeError:
-        resposta_llm = servico_llm.gerar_resposta_fundamentada(
-            pergunta=pergunta,
-            contexto=contexto_final,
-            modelo=modelo_selecionado,
-            ao_receber_reasoning=ao_receber_reasoning,
-            ao_receber_conteudo=ao_receber_conteudo,
-        )
-
-    citacoes_finais = resposta_llm.citacoes if decisao.usar_rag else []
-    total_ms = (
-        decisao.roteamento_ms + embed_ms_total + db_rrf_ms_total + resposta_llm.llm_ms
+    resultado_a2, telemetria_a2 = executar_com_telemetria(
+        tarefa_a2,
+        buscador=buscador,
+        servico_llm=servico_llm,
+        ao_avancar_etapa=ao_avancar_etapa,
+        ao_receber_reasoning=ao_receber_reasoning,
+        ao_receber_conteudo=ao_receber_conteudo,
     )
-    id_turno = st.session_state.next_msg_id
-    st.session_state.next_msg_id += 1
+
+    saidas = resultado_a2.get("saidas") or []
+    resposta_texto = (
+        str(saidas[0].get("texto", ""))
+        if saidas
+        else str((resultado_a2.get("erro") or {}).get("mensagem", ""))
+    )
+
+    if telemetria_a2 is not None:
+        rot_a2 = telemetria_a2.roteamento
+        decisao = DecisaoRoteamento(
+            id_base=rot_a2.id_base,
+            codigo_base=rot_a2.codigo_base,
+            nome_base=rot_a2.nome_base,
+            tool_name=rot_a2.tool_name,
+            query_busca=rot_a2.query_busca,
+            modo_roteamento=rot_a2.modo_roteamento,
+            roteamento_ms=rot_a2.roteamento_ms,
+            chamadas=[
+                ChamadaFerramentaRAG(
+                    id_base=c.id_base,
+                    codigo_base=c.codigo_base,
+                    nome_base=c.nome_base,
+                    tool_name=c.tool_name,
+                    query_busca=c.query_busca,
+                    peso=c.peso,
+                    limite_trechos=c.limite_trechos,
+                )
+                for c in rot_a2.chamadas
+            ],
+            usar_rag=rot_a2.usar_rag,
+        )
+        m_a2 = telemetria_a2.metricas_llm
+        metricas_llm = MetricasOllama(
+            modelo=m_a2.modelo,
+            prompt_eval_count=m_a2.prompt_eval_count,
+            eval_count=m_a2.eval_count,
+            load_duration_ms=m_a2.load_duration_ms,
+            eval_duration_ms=m_a2.eval_duration_ms,
+            total_duration_ms=m_a2.total_duration_ms,
+            tokens_por_segundo=m_a2.tokens_por_segundo,
+        )
+        t_a2 = telemetria_a2.tempos
+        tempos = TemposTurno(
+            total_ms=t_a2.total_ms,
+            roteamento_ms=t_a2.roteamento_ms,
+            embed_ms=t_a2.embed_ms,
+            db_rrf_ms=t_a2.db_rrf_ms,
+            llm_ms=t_a2.llm_ms,
+        )
+        citacoes_finais = telemetria_a2.citacoes if rot_a2.usar_rag else []
+        estatisticas_finais = telemetria_a2.estatisticas_embedding
+        detalhes_mesclados = telemetria_a2.detalhes_trechos
+        reasoning = telemetria_a2.reasoning
+        prompt_enviado = telemetria_a2.prompt_enviado
+        agentes_crew = telemetria_a2.agentes_acionados
+        id_solicitacao_epi = telemetria_a2.id_solicitacao_epi
+    else:
+        decisao = DecisaoRoteamento(
+            id_base=None,
+            codigo_base="CHAT",
+            nome_base="Chat Direto (Sem RAG)",
+            tool_name="nenhuma",
+            query_busca="",
+            modo_roteamento="erro_a2",
+            usar_rag=False,
+        )
+        metricas_llm = MetricasOllama(modelo=modelo_selecionado or "openai/gpt-oss-20b")
+        tempos = TemposTurno()
+        citacoes_finais = []
+        estatisticas_finais = EstatisticasEmbedding(dimensoes=0, norma_l2=0.0)
+        detalhes_mesclados = []
+        reasoning = ""
+        prompt_enviado = ""
+        agentes_crew = []
+        id_solicitacao_epi = None
 
     return TelemetriaTurno(
         id_turno=id_turno,
         pergunta=pergunta,
-        resposta=resposta_llm.resposta,
-        reasoning=resposta_llm.reasoning,
+        resposta=resposta_texto,
+        reasoning=reasoning,
         citacoes=citacoes_finais,
         roteamento=decisao,
-        tempos=TemposTurno(
-            total_ms=round(total_ms, 2),
-            roteamento_ms=decisao.roteamento_ms,
-            embed_ms=round(embed_ms_total, 2),
-            db_rrf_ms=round(db_rrf_ms_total, 2),
-            llm_ms=resposta_llm.llm_ms,
-        ),
+        tempos=tempos,
         estatisticas_embedding=estatisticas_finais,
         detalhes_trechos=detalhes_mesclados,
-        metricas_ollama=resposta_llm.metricas,
-        prompt_enviado=resposta_llm.prompt_enviado,
+        metricas_ollama=metricas_llm,
+        prompt_enviado=prompt_enviado,
+        agentes_crew=agentes_crew,
+        id_solicitacao_epi=id_solicitacao_epi,
     )
 
 
@@ -626,9 +651,15 @@ def _renderizar_raio_x(turno: TelemetriaTurno) -> None:
     with aba_tool:
         ol = turno.metricas_ollama
         with st.container(border=True):
-            st.markdown("**Tool(s) escolhida(s) & métricas de geração**")
+            st.markdown("**Tool(s) escolhida(s) pela Crew A2 & métricas de geração**")
+            crew_line = (
+                f"# crew_a2={ ' -> '.join(turno.agentes_crew) }\n"
+                if turno.agentes_crew
+                else ""
+            )
             if not turno.roteamento.usar_rag or not turno.roteamento.chamadas:
                 codigo_tools = (
+                    f"{crew_line}"
                     "# Guardrail conversacional: nenhuma tool de busca vetorial executada\n"
                     f"# modo={turno.roteamento.modo_roteamento} | modelo={ol.modelo}"
                 )
@@ -640,9 +671,10 @@ def _renderizar_raio_x(turno: TelemetriaTurno) -> None:
                 linhas_tools.append(
                     f"# modo={turno.roteamento.modo_roteamento} | modelo={ol.modelo}"
                 )
-                codigo_tools = "\n".join(linhas_tools)
+                codigo_tools = f"{crew_line}" + "\n".join(linhas_tools)
             else:
                 codigo_tools = (
+                    f"{crew_line}"
                     f"{turno.roteamento.tool_name}(query={turno.roteamento.query_busca!r}) "
                     f"# modo={turno.roteamento.modo_roteamento} | modelo={ol.modelo}"
                 )
@@ -681,7 +713,7 @@ with hdr_title:
     st.html(
         '<h1 class="sinergia-header-title">SinergIA - RAG Demo</h1>'
         '<p class="sinergia-header-subtitle">'
-        "A LLM decide autonomamente qual base consultar. Selecione qualquer resposta para abrir o Raio-X técnico."
+        "O Agente 2 (CrewAI + Groq) decide autonomamente qual base consultar. Selecione qualquer resposta para abrir o Raio-X técnico."
         "</p>"
     )
 
@@ -690,8 +722,8 @@ ativos_cloud: list[str] = servico_llm.listar_modelos_disponiveis()
 modelos_disponiveis = servico_llm.listar_modelos_com_presets()
 
 modelo_preset_padrao = (
-    "openai/gpt-oss-20b"
-    if "openai/gpt-oss-20b" in modelos_disponiveis
+    "openai/gpt-oss-120b"
+    if "openai/gpt-oss-120b" in modelos_disponiveis
     else (modelos_disponiveis[0] if modelos_disponiveis else None)
 )
 if (
@@ -780,6 +812,10 @@ with col_chat:
                         ):
                             st.markdown(turno.reasoning)
                     st.markdown(turno.resposta)
+                    if turno.id_solicitacao_epi is not None:
+                        st.caption(
+                            f":material/assignment_turned_in: Solicitação de reposição EPI nº {turno.id_solicitacao_epi} aberta (ABERTA · NR-6)"
+                        )
                     st.caption(
                         f"Tempo total: {turno.tempos.total_ms / 1000.0:.2f} s · Modelo: {turno.metricas_ollama.modelo}"
                     )
@@ -825,8 +861,18 @@ with col_chat:
                 reasoning_placeholder = st.empty()
                 resposta_placeholder = st.empty()
                 throttle = {"reasoning": 0.0, "conteudo": 0.0}
+                script_ctx = get_script_run_ctx(suppress_warning=True)
+
+                def _garantir_contexto_st() -> bool:
+                    if script_ctx is None:
+                        return False
+                    if get_script_run_ctx(suppress_warning=True) is None:
+                        add_script_run_ctx(ctx=script_ctx)
+                    return True
 
                 def _atualizar_loading(etapa: str) -> None:
+                    if not _garantir_contexto_st():
+                        return
                     status_box.update(label=f":shimmer[{etapa}]", state="running")
                     etapas_placeholder.write(etapa)
 
@@ -835,6 +881,8 @@ with col_chat:
                     if agora - throttle["reasoning"] < 0.05:
                         return
                     throttle["reasoning"] = agora
+                    if not _garantir_contexto_st():
+                        return
                     status_box.update(
                         label=":shimmer[Pensando e gerando resposta...]",
                         state="running",
@@ -848,6 +896,8 @@ with col_chat:
                     if agora - throttle["conteudo"] < 0.05:
                         return
                     throttle["conteudo"] = agora
+                    if not _garantir_contexto_st():
+                        return
                     status_box.update(
                         label=":shimmer[Escrevendo resposta...]",
                         state="running",

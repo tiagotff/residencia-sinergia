@@ -8,13 +8,12 @@ from unittest.mock import MagicMock, patch
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from sinergia.rag.interfaces import MetadadosTrecho, TrechoRecuperado
-from sinergia.rag.pitch.app import (
+from sinergia.chat_demo.app import (
     carregar_trechos_fallback_mocks,
     executar_turno_rag,
     obter_historico_chat_sessao,
 )
-from sinergia.rag.pitch.ollama_service import (
+from sinergia.chat_demo.ollama_service import (
     PRESETS_MODELOS_GROQ,
     ChamadaFerramentaRAG,
     DecisaoRoteamento,
@@ -22,10 +21,11 @@ from sinergia.rag.pitch.ollama_service import (
     MetricasOllama,
     RespostaGeradaOllama,
 )
+from sinergia.rag.interfaces import MetadadosTrecho, TrechoRecuperado
 from sinergia.rag.retrievers import BuscadorHibrido
 
 APP_PATH = str(
-    Path(__file__).resolve().parents[3] / "src" / "sinergia" / "rag" / "pitch" / "app.py"
+    Path(__file__).resolve().parents[3] / "src" / "sinergia" / "chat_demo" / "app.py"
 )
 
 
@@ -61,10 +61,10 @@ class TestPitchApp(unittest.TestCase):
         bases_carregadas = {t.metadados.id_base for t in trechos}
         self.assertEqual(bases_carregadas, {1, 2, 3, 4, 5})
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.stream")
-    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
-    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
-    @patch("sinergia.rag.pitch.app._banco_disponivel_com_dados", return_value=False)
+    @patch("sinergia.chat_demo.ollama_service.httpx.stream")
+    @patch("sinergia.chat_demo.ollama_service.httpx.post")
+    @patch("sinergia.chat_demo.ollama_service.httpx.get")
+    @patch("sinergia.chat_demo.app._banco_disponivel_com_dados", return_value=False)
     def test_fluxo_completo_apptest_visao_global_e_raio_x(
         self, mock_pg_check, mock_http_get, mock_http_post, mock_http_stream
     ):
@@ -155,7 +155,7 @@ class TestPitchApp(unittest.TestCase):
         with (
             patch("sinergia.rag.retrievers.BuscadorHibrido", return_value=buscador_mock),
             patch(
-                "sinergia.rag.pitch.ollama_service.GroqPitchService",
+                "sinergia.chat_demo.ollama_service.GroqPitchService",
                 return_value=groq_service,
             ),
             patch("sinergia.rag.chunking.chunking_documento_pdf", return_value=[]),
@@ -167,7 +167,7 @@ class TestPitchApp(unittest.TestCase):
 
             self.assertEqual(len(at.toggle), 0)
             self.assertEqual(len(at.selectbox), 1)
-            self.assertEqual(at.selectbox(key="ollama_model_select").value, "openai/gpt-oss-20b")
+            self.assertEqual(at.selectbox(key="ollama_model_select").value, "openai/gpt-oss-120b")
             self.assertEqual(
                 at.selectbox[0].options[:2],
                 ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"],
@@ -217,10 +217,10 @@ class TestPitchApp(unittest.TestCase):
             subheaders_after = [s.value for s in at.subheader]
             self.assertIn("Métricas agregadas do pipeline", subheaders_after)
 
-    @patch("sinergia.rag.pitch.ollama_service.httpx.stream")
-    @patch("sinergia.rag.pitch.ollama_service.httpx.post")
-    @patch("sinergia.rag.pitch.ollama_service.httpx.get")
-    @patch("sinergia.rag.pitch.app._banco_disponivel_com_dados", return_value=False)
+    @patch("sinergia.chat_demo.ollama_service.httpx.stream")
+    @patch("sinergia.chat_demo.ollama_service.httpx.post")
+    @patch("sinergia.chat_demo.ollama_service.httpx.get")
+    @patch("sinergia.chat_demo.app._banco_disponivel_com_dados", return_value=False)
     def test_groq_preset_gpt_oss_20b_padrao_e_executa_consulta(
         self, mock_pg_check, mock_http_get, mock_http_post, mock_http_stream
     ):
@@ -309,7 +309,7 @@ class TestPitchApp(unittest.TestCase):
         with (
             patch("sinergia.rag.retrievers.BuscadorHibrido", return_value=buscador_mock),
             patch(
-                "sinergia.rag.pitch.ollama_service.GroqPitchService",
+                "sinergia.chat_demo.ollama_service.GroqPitchService",
                 return_value=groq_service,
             ),
             patch("sinergia.rag.chunking.chunking_documento_pdf", return_value=[]),
@@ -325,7 +325,7 @@ class TestPitchApp(unittest.TestCase):
             )
             for p in PRESETS_MODELOS_GROQ:
                 self.assertIn(p, at.selectbox[0].options)
-            self.assertEqual(at.selectbox(key="ollama_model_select").value, "openai/gpt-oss-20b")
+            self.assertEqual(at.selectbox(key="ollama_model_select").value, "openai/gpt-oss-120b")
 
             at.chat_input(key="chat_input_pitch").set_value(
                 "Qual a pausa na NR-17?"
@@ -334,7 +334,7 @@ class TestPitchApp(unittest.TestCase):
             markdown_text = " ".join(m.value for m in at.markdown)
             self.assertIn("Resposta via Groq Cloud", markdown_text)
             ultimo_turno = at.session_state["turnos"][-1]
-            self.assertEqual(ultimo_turno.metricas_ollama.modelo, "openai/gpt-oss-20b")
+            self.assertEqual(ultimo_turno.metricas_ollama.modelo, "openai/gpt-oss-120b")
 
     def test_executar_turno_rag_mescla_multiplas_bases_por_peso(self):
         mock_emb = MagicMock()
@@ -523,6 +523,66 @@ class TestPitchApp(unittest.TestCase):
         kwargs_geracao = servico_mock.gerar_resposta_fundamentada.call_args.kwargs
         self.assertEqual(kwargs_roteamento["historico"], historico_extraido)
         self.assertEqual(kwargs_geracao["historico"], historico_extraido)
+
+    def test_executar_turno_rag_aciona_agente2_e_preenche_telemetria_crew(self):
+        from sinergia.agentes.a2_bem_estar import limpar_cache_idempotencia
+
+        limpar_cache_idempotencia()
+        mock_emb = MagicMock()
+        mock_emb.model_name = "tardellirs/colibri-embed-ptbr"
+        mock_emb.gerar_embedding.return_value = [0.02] * 768
+
+        buscador_mock = BuscadorHibrido(gerador_embeddings=mock_emb)
+        buscador_mock.adicionar_trechos_memoria(
+            [
+                TrechoRecuperado(
+                    id_trecho=88,
+                    conteudo="NR-6: Em caso de luva danificada, interrompa a atividade e solicite reposição.",
+                    metadados=MetadadosTrecho(
+                        id_documento=5,
+                        titulo="Procedimento de reposição de EPI",
+                        fonte="NR-6",
+                        versao="1.2",
+                        secao="Item 3.2",
+                        pagina=2,
+                        id_base=5,
+                        vigente=True,
+                    ),
+                )
+            ]
+        )
+
+        servico_mock = MagicMock()
+        servico_mock.gerar_resposta_fundamentada.return_value = RespostaGeradaOllama(
+            resposta="Não execute a atividade de risco sem a luva adequada. Pedido nº 58 aberto.",
+            citacoes=["Procedimento de reposição de EPI (v1.2) · Item 3.2 · Pág. 2"],
+            metricas=MetricasOllama(
+                modelo="openai/gpt-oss-20b",
+                prompt_eval_count=300,
+                eval_count=25,
+                tokens_por_segundo=120.0,
+            ),
+            llm_ms=42.0,
+            prompt_enviado="prompt crew a2",
+        )
+
+        st.session_state.turnos = []
+        st.session_state.next_msg_id = 1
+        with patch("sinergia.agentes.a2_bem_estar.servico._postgres_a2_disponivel", return_value=False):
+            turno = executar_turno_rag(
+                pergunta="Minha luva de proteção rasgou durante o turno",
+                modelo_selecionado="openai/gpt-oss-20b",
+                buscador=buscador_mock,
+                servico_llm=servico_mock,
+            )
+
+        self.assertEqual(turno.roteamento.codigo_base, "F5")
+        self.assertEqual(turno.agentes_crew, ["gerente_roteador", "especialista_epi", "redator_final"])
+        self.assertEqual(turno.id_solicitacao_epi, 58)
+        self.assertEqual(turno.estatisticas_embedding.dimensoes, 768)
+        self.assertEqual(len(turno.detalhes_trechos), 1)
+        self.assertEqual(turno.metricas_ollama.prompt_eval_count, 300)
+        self.assertIn("Procedimento de reposição de EPI (v1.2)", turno.citacoes[0])
 
 
 if __name__ == "__main__":

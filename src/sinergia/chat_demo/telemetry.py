@@ -3,12 +3,12 @@
 
 from pydantic import BaseModel, Field
 
-from sinergia.rag.interfaces import DetalheScoreTrecho, EstatisticasEmbedding
-from sinergia.rag.pitch.ollama_service import (
+from sinergia.chat_demo.ollama_service import (
     MAPA_BASES_FERRAMENTAS,
     DecisaoRoteamento,
     MetricasOllama,
 )
+from sinergia.rag.interfaces import DetalheScoreTrecho, EstatisticasEmbedding
 
 
 class TemposTurno(BaseModel):
@@ -44,6 +44,14 @@ class TelemetriaTurno(BaseModel):
     )
     metricas_ollama: MetricasOllama = Field(..., description="Métricas nativas de tokens/s do Ollama")
     prompt_enviado: str = Field(default="", description="Prompt completo enviado ao Ollama")
+    agentes_crew: list[str] = Field(
+        default_factory=list,
+        description="Agentes da CrewAI do Agente 2 acionados no turno",
+    )
+    id_solicitacao_epi: int | None = Field(
+        default=None,
+        description="ID de solicitação de reposição de EPI aberta em F5, se aplicável",
+    )
 
 
 class DistribuicaoBase(BaseModel):

@@ -2,15 +2,15 @@
 
 from pathlib import Path
 
-from sinergia.rag.chunking import chunking_documento_pdf
-from sinergia.rag.ingestao import MAPA_MOCKS_PADRAO
-from sinergia.rag.interfaces import MetadadosTrecho
-from sinergia.rag.pitch.pdf_preview import (
+from sinergia.chat_demo.pdf_preview import (
     CoordenadaBBox,
     extrair_bboxes_trecho,
     renderizar_visualizacao_trecho,
     resolver_caminho_pdf,
 )
+from sinergia.rag.chunking import chunking_documento_pdf
+from sinergia.rag.ingestao import MAPA_MOCKS_PADRAO
+from sinergia.rag.interfaces import MetadadosTrecho
 
 DIRETORIO_MOCKS = Path(__file__).resolve().parents[3] / "data" / "rag" / "mocks"
 
