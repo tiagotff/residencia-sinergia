@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pymupdf
@@ -11,6 +12,7 @@ from PIL import Image
 
 from sinergia.agentes.a1_recepcao import (
     construir_mensagens_extracao,
+    gerar_atestados_golden,
     ocr,
     processar_arquivo_atestado,
 )
@@ -145,3 +147,33 @@ def test_integracao_real_ocr_pdf_para_prompts_1a1_e_1a2(tmp_path) -> None:
     assert len(mensagens) == 2
     assert "application/pdf" in mensagens[1][1]
     assert "Carla" in mensagens[1][1] or "carla" in mensagens[1][1].lower()
+
+
+def test_corpus_golden_sintetico_e_anonimizado(tmp_path) -> None:
+    amostras = gerar_atestados_golden(
+        tmp_path,
+        quantidade=40,
+        seed=20261118,
+        sobrescrever=True,
+    )
+
+    assert len(amostras) == 40
+    assert len({amostra.layout for amostra in amostras}) >= 4
+    assert len({amostra.qualidade_foto for amostra in amostras}) >= 6
+    assert len({amostra.esperado.cid for amostra in amostras}) >= 5
+
+    manifest_path = tmp_path / "gabarito_atestados_golden.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["versao"] == "golden-1.0"
+    assert manifest["seed"] == 20261118
+    assert manifest["anonimizado"] is True
+    assert manifest["total_amostras"] == 40
+
+    for amostra in amostras:
+        png = Path(amostra.arquivo_png)
+        pdf = Path(amostra.arquivo_pdf)
+        assert png.is_file()
+        assert pdf.is_file()
+        assert hashlib.sha256(png.read_bytes()).hexdigest() == amostra.sha256_png
+        assert hashlib.sha256(pdf.read_bytes()).hexdigest() == amostra.sha256_pdf
+        assert amostra.anonimizacao == "dados 100% ficticios"

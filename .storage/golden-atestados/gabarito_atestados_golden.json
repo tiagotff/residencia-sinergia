@@ -1,0 +1,1809 @@
+{
+  "versao": "golden-1.0",
+  "seed": 20261118,
+  "total_amostras": 60,
+  "anonimizado": true,
+  "uso": "testes OCR, extracao LLM e avaliacao automatizada",
+  "amostras": [
+    {
+      "id_amostra": "golden_atestado_001",
+      "titulo": "Caso golden sintético 001",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_001.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_001.pdf",
+      "sha256_png": "662b1a759fbf76c8e4f610eb5b5b7d4041df3f06a650dbb970783e93d49eaa4e",
+      "sha256_pdf": "275667de8a790a71817d93af2648da22ee2a881f804c87a164ab02e68046d41e",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Ana Nunes",
+        "periodo": {
+          "inicio": "2026-04-29",
+          "fim": "2026-05-09"
+        },
+        "data_emissao": "2026-04-29",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "102030",
+          "uf": "SP",
+          "nome": "Dr. exemplo um"
+        },
+        "cid": "J06.9",
+        "municipio": "São Paulo"
+      },
+      "cenario": "golden_legivel_layout_1",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "boa",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_002",
+      "titulo": "Caso golden sintético 002",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_002.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_002.pdf",
+      "sha256_png": "54d23722f50650859c01387a52912f967d318198a923e19deca4abd120692436",
+      "sha256_pdf": "6c0a9eeb11e70d1d51761a02bda6208696d868d03b5ef79fc8a2ae35babcc6da",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Bruno Lima",
+        "periodo": {
+          "inicio": "2026-01-24",
+          "fim": "2026-01-31"
+        },
+        "data_emissao": "2026-01-24",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "204050",
+          "uf": "SP",
+          "nome": "Dra. exemplo dois"
+        },
+        "cid": "M54.5",
+        "municipio": "Campinas"
+      },
+      "cenario": "golden_legivel_layout_2",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_003",
+      "titulo": "Caso golden sintético 003",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_003.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_003.pdf",
+      "sha256_png": "deec45cb1bd1603dd560fe946a2116cf1b756dd08b0dbdc16318e76fd8e43f4b",
+      "sha256_pdf": "8d45996cfc0f9e93b565a30b4811141612d6a657a4853c257585509d2158fa38",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Carla Mendes",
+        "periodo": {
+          "inicio": "2026-09-25",
+          "fim": "2026-10-17"
+        },
+        "data_emissao": "2026-09-25",
+        "profissional": {
+          "conselho": "CRO",
+          "numero": "305060",
+          "uf": "SP",
+          "nome": "Dr. exemplo tres"
+        },
+        "cid": "F41.1",
+        "municipio": "Ribeirao Preto"
+      },
+      "cenario": "golden_legivel_layout_3",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_004",
+      "titulo": "Caso golden sintético 004",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_004.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_004.pdf",
+      "sha256_png": "e03c16929a235f24f0d35d15136080b4e306127920e5bae4bb367ab7eaad1548",
+      "sha256_pdf": "e0719142900a9f707789ea617fb15e947b8071b0abc78c4c550cd1b862ce0664",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Diego Alves",
+        "periodo": {
+          "inicio": "2026-04-09",
+          "fim": "2026-04-15"
+        },
+        "data_emissao": "2026-04-09",
+        "profissional": {
+          "conselho": "CRP",
+          "numero": "407080",
+          "uf": "SP",
+          "nome": "Dra. exemplo quatro"
+        },
+        "cid": "Z00.0",
+        "municipio": "Santos"
+      },
+      "cenario": "golden_legivel_layout_4",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "boa",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_005",
+      "titulo": "Caso golden sintético 005",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_005.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_005.pdf",
+      "sha256_png": "84b1134adbc1e0a4fff7e092c07fe8eda6ae2fe38dd9639b2359839e6b042669",
+      "sha256_pdf": "a28cac9da47c003e5295e0e0045e0eb76b85be23ce4a2f6bcb7faf796ebb6cb0",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "golden_ilegivel_cortada",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "cortada",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_006",
+      "titulo": "Caso golden sintético 006",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_006.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_006.pdf",
+      "sha256_png": "6d5fc8bf0273642649a7c6c3089b52e1a26e58c70a752509a47db3eccd0b2481",
+      "sha256_pdf": "58f68845000fc443999badd8daf3772bc3606b1240939a4dd00e0930669e46b9",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Fabio Souza",
+        "periodo": {
+          "inicio": "2026-05-01",
+          "fim": "2026-05-09"
+        },
+        "data_emissao": "2026-05-01",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "204050",
+          "uf": "SP",
+          "nome": "Dra. exemplo dois"
+        },
+        "cid": "H60.3",
+        "municipio": "São Paulo"
+      },
+      "cenario": "golden_legivel_layout_2",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "tremida",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_007",
+      "titulo": "Caso golden sintético 007",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_007.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_007.pdf",
+      "sha256_png": "ab3eddc1f8beac41697841d116144cdb951612af0dd132fc9bdd8907cdf3ed9f",
+      "sha256_pdf": "16a1e264d166335e0cc42abc967f6d22038e71149fb352fd9e0bad957e490289",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Julia Rocha",
+        "periodo": {
+          "inicio": "2026-10-07",
+          "fim": "2026-10-13"
+        },
+        "data_emissao": "2026-10-07",
+        "profissional": {
+          "conselho": "CRO",
+          "numero": "305060",
+          "uf": "SP",
+          "nome": "Dr. exemplo tres"
+        },
+        "cid": null,
+        "municipio": "Campinas"
+      },
+      "cenario": "golden_legivel_layout_3",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_008",
+      "titulo": "Caso golden sintético 008",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_008.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_008.pdf",
+      "sha256_png": "c34fe63d139f7c0764aba71ecae50bddebd5b2a1d1579a5ada929493d0ca4939",
+      "sha256_pdf": "e67f8387c54a2d4c21f08d093c2ae022b33e23a400ee583ee462210a11c8e449",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Leo Castro",
+        "periodo": {
+          "inicio": "2026-05-04",
+          "fim": "2026-05-22"
+        },
+        "data_emissao": "2026-05-04",
+        "profissional": {
+          "conselho": "CRP",
+          "numero": "407080",
+          "uf": "SP",
+          "nome": "Dra. exemplo quatro"
+        },
+        "cid": "J06.9",
+        "municipio": "Ribeirao Preto"
+      },
+      "cenario": "golden_legivel_layout_4",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "ruido",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_009",
+      "titulo": "Caso golden sintético 009",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_009.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_009.pdf",
+      "sha256_png": "c7851eeb07d654fbef495cd5203f2c4168842b46b1baddf3311c61c130cc6d67",
+      "sha256_pdf": "b906545c8e50529803f0ac1e5c7ef88203ddf1e12175b0ca31450f5283ee86d4",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Mara Brito",
+        "periodo": {
+          "inicio": "2026-09-07",
+          "fim": "2026-09-09"
+        },
+        "data_emissao": "2026-09-07",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "102030",
+          "uf": "SP",
+          "nome": "Dr. exemplo um"
+        },
+        "cid": "M54.5",
+        "municipio": "Santos"
+      },
+      "cenario": "golden_legivel_layout_1",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "boa",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_010",
+      "titulo": "Caso golden sintético 010",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_010.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_010.pdf",
+      "sha256_png": "20a129033bde885de6a30d83d7a79401a653a19b95434093028092a466cd5f69",
+      "sha256_pdf": "7ee11b2492fc12e53d7cf422e1e93cc2dc90b301407419c725971bad53c8b171",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "golden_ilegivel_manchado",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "manchado",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_011",
+      "titulo": "Caso golden sintético 011",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_011.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_011.pdf",
+      "sha256_png": "0a6c894e849de020b88ae26ae03f8e3a77979c4020813bfd00a1ed91a9023c3c",
+      "sha256_pdf": "476169defcdcfb628a43cc1637c2c24327d74efa083867616cfb7a42ddc0ef8d",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Ana Nunes",
+        "periodo": {
+          "inicio": "2026-07-03",
+          "fim": "2026-07-15"
+        },
+        "data_emissao": "2026-07-03",
+        "profissional": {
+          "conselho": "CRO",
+          "numero": "305060",
+          "uf": "SP",
+          "nome": "Dr. exemplo tres"
+        },
+        "cid": "Z00.0",
+        "municipio": "São Paulo"
+      },
+      "cenario": "golden_legivel_layout_3",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "ruido",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_012",
+      "titulo": "Caso golden sintético 012",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_012.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_012.pdf",
+      "sha256_png": "a5abb1d7142e52a0bc16e332f66c74dedb164ac1e2b68c830133daa66414d431",
+      "sha256_pdf": "4b606a1adb872ab31d24a569a84168f1dfb59a51eb0bbbaffaf6cdcad73b5531",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Bruno Lima",
+        "periodo": {
+          "inicio": "2026-08-01",
+          "fim": "2026-08-25"
+        },
+        "data_emissao": "2026-08-01",
+        "profissional": {
+          "conselho": "CRP",
+          "numero": "407080",
+          "uf": "SP",
+          "nome": "Dra. exemplo quatro"
+        },
+        "cid": "S43.4",
+        "municipio": "Campinas"
+      },
+      "cenario": "golden_legivel_layout_4",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "ruido",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_013",
+      "titulo": "Caso golden sintético 013",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_013.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_013.pdf",
+      "sha256_png": "66ed68ec0e46883aab0fef685a6b4f7c2723575f66297e0ce8fb9446da8a766d",
+      "sha256_pdf": "04aa8f471775d6e2b11462fd554eb3411f8b1291bc8b8687333a676417a72488",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Carla Mendes",
+        "periodo": {
+          "inicio": "2026-04-23",
+          "fim": "2026-05-10"
+        },
+        "data_emissao": "2026-04-23",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "102030",
+          "uf": "SP",
+          "nome": "Dr. exemplo um"
+        },
+        "cid": "H60.3",
+        "municipio": "Ribeirao Preto"
+      },
+      "cenario": "golden_legivel_layout_1",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_014",
+      "titulo": "Caso golden sintético 014",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_014.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_014.pdf",
+      "sha256_png": "67773c8f30ba718b99a729763e5be48900100bd6bc9369ec68e34856f33f7bd9",
+      "sha256_pdf": "c7fd37640ed3861ac5ea86323858956138924522b222e7ef78fc355f82c3d09f",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Diego Alves",
+        "periodo": {
+          "inicio": "2026-01-17",
+          "fim": "2026-01-23"
+        },
+        "data_emissao": "2026-01-17",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "204050",
+          "uf": "SP",
+          "nome": "Dra. exemplo dois"
+        },
+        "cid": null,
+        "municipio": "Santos"
+      },
+      "cenario": "golden_legivel_layout_2",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "baixa_resolucao",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_015",
+      "titulo": "Caso golden sintético 015",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_015.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_015.pdf",
+      "sha256_png": "aef6d119d50fc37214f017e77958b12232df0c0bf626c34373094574b391c97c",
+      "sha256_pdf": "dc2bddddde1eeabb20ea5462c58202711410dcd3da129330ff569b536c803565",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "golden_ilegivel_manchado",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "manchado",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_016",
+      "titulo": "Caso golden sintético 016",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_016.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_016.pdf",
+      "sha256_png": "e39681c3cc1d65dd2a6ca3e511fd7a2646c605852ee05b9b9fcd49c8cf49a041",
+      "sha256_pdf": "dacce808d202b795655cbdf6b956c12cce95613ecb789caabf40462449b07a54",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Fabio Souza",
+        "periodo": {
+          "inicio": "2026-10-28",
+          "fim": "2026-11-21"
+        },
+        "data_emissao": "2026-10-28",
+        "profissional": {
+          "conselho": "CRP",
+          "numero": "407080",
+          "uf": "SP",
+          "nome": "Dra. exemplo quatro"
+        },
+        "cid": "M54.5",
+        "municipio": "São Paulo"
+      },
+      "cenario": "golden_legivel_layout_4",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "boa",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_017",
+      "titulo": "Caso golden sintético 017",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_017.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_017.pdf",
+      "sha256_png": "8adc46504939986b1969186461be2195279d0267c99ad936eebd4439f55325ef",
+      "sha256_pdf": "00587734ac2a3a3aa1f3204d897c12347db73aa390bb11e8cdb37c5dc3ae4404",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Julia Rocha",
+        "periodo": {
+          "inicio": "2026-10-23",
+          "fim": "2026-11-03"
+        },
+        "data_emissao": "2026-10-23",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "102030",
+          "uf": "SP",
+          "nome": "Dr. exemplo um"
+        },
+        "cid": "F41.1",
+        "municipio": "Campinas"
+      },
+      "cenario": "golden_legivel_layout_1",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "tremida",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_018",
+      "titulo": "Caso golden sintético 018",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_018.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_018.pdf",
+      "sha256_png": "26ec3bc6429c0c54096a2e4f7debf228136fba0544baee21c5bb497b36b90cdf",
+      "sha256_pdf": "8f366daef9830e575c6f75feb0ff2eba8617bd32c1aa1f07627b8035a73bce75",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Leo Castro",
+        "periodo": {
+          "inicio": "2026-05-15",
+          "fim": "2026-05-24"
+        },
+        "data_emissao": "2026-05-15",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "204050",
+          "uf": "SP",
+          "nome": "Dra. exemplo dois"
+        },
+        "cid": "Z00.0",
+        "municipio": "Ribeirao Preto"
+      },
+      "cenario": "golden_legivel_layout_2",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_019",
+      "titulo": "Caso golden sintético 019",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_019.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_019.pdf",
+      "sha256_png": "6892a6c18df9842c0ab85219a74f7ff19dda9cc0038501853a06470628477fa1",
+      "sha256_pdf": "54678d20b0aeef550ffff34cf0db22654276aca7e69a3415acc96fa4d40e1c76",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Mara Brito",
+        "periodo": {
+          "inicio": "2026-10-08",
+          "fim": "2026-10-14"
+        },
+        "data_emissao": "2026-10-08",
+        "profissional": {
+          "conselho": "CRO",
+          "numero": "305060",
+          "uf": "SP",
+          "nome": "Dr. exemplo tres"
+        },
+        "cid": "S43.4",
+        "municipio": "Santos"
+      },
+      "cenario": "golden_legivel_layout_3",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "boa",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_020",
+      "titulo": "Caso golden sintético 020",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_020.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_020.pdf",
+      "sha256_png": "7759e0d296d5709c9ed85140bc7e58441ca5f56b8661ff7feb6c905fe32d8c4f",
+      "sha256_pdf": "c49ebae24a809e5dfc3258234ed1efb43fb267c69ff6bfa7223f674d90ca7090",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "golden_ilegivel_manchado",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "manchado",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_021",
+      "titulo": "Caso golden sintético 021",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_021.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_021.pdf",
+      "sha256_png": "4ea2633114b19a6e6493ac26a23258af24beb6d54f5c1c4f5edc7e915c95f404",
+      "sha256_pdf": "df8aa1ef20a7f0cebe837e985b5abc128c42bf5b49b9cfb7817ca51cca6fe559",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Ana Nunes",
+        "periodo": {
+          "inicio": "2026-02-06",
+          "fim": "2026-02-08"
+        },
+        "data_emissao": "2026-02-06",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "102030",
+          "uf": "SP",
+          "nome": "Dr. exemplo um"
+        },
+        "cid": null,
+        "municipio": "São Paulo"
+      },
+      "cenario": "golden_legivel_layout_1",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "boa",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_022",
+      "titulo": "Caso golden sintético 022",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_022.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_022.pdf",
+      "sha256_png": "ead53174a06b7ff3b1fd580516f8f9d5a796b510b836f97bfba72e43787df9d7",
+      "sha256_pdf": "25d0c3ba4ed03145df2e4fbb1b495754e88d106d56ed4049b8bb3af0affcec15",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Bruno Lima",
+        "periodo": {
+          "inicio": "2026-02-18",
+          "fim": "2026-03-11"
+        },
+        "data_emissao": "2026-02-18",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "204050",
+          "uf": "SP",
+          "nome": "Dra. exemplo dois"
+        },
+        "cid": "J06.9",
+        "municipio": "Campinas"
+      },
+      "cenario": "golden_legivel_layout_2",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "baixa_resolucao",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_023",
+      "titulo": "Caso golden sintético 023",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_023.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_023.pdf",
+      "sha256_png": "d9b8101600cf964532db355fa36a6e570ae828f5155c03a7719e32182406aa60",
+      "sha256_pdf": "2a13cbe50686f93640fedfa4426be4034a690531f58086c419a2d44b26cb1f00",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Carla Mendes",
+        "periodo": {
+          "inicio": "2026-05-08",
+          "fim": "2026-05-21"
+        },
+        "data_emissao": "2026-05-08",
+        "profissional": {
+          "conselho": "CRO",
+          "numero": "305060",
+          "uf": "SP",
+          "nome": "Dr. exemplo tres"
+        },
+        "cid": "M54.5",
+        "municipio": "Ribeirao Preto"
+      },
+      "cenario": "golden_legivel_layout_3",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "ruido",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_024",
+      "titulo": "Caso golden sintético 024",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_024.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_024.pdf",
+      "sha256_png": "a9cd8e39c00fc3334f7bf0b33d3e048b1d0e3c222902681d661ac5bf1d3c7564",
+      "sha256_pdf": "0c16873bfe03b95fff6b707650d949ec834eb3e4767944a0533f086d721ccfaa",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Diego Alves",
+        "periodo": {
+          "inicio": "2026-08-29",
+          "fim": "2026-09-16"
+        },
+        "data_emissao": "2026-08-29",
+        "profissional": {
+          "conselho": "CRP",
+          "numero": "407080",
+          "uf": "SP",
+          "nome": "Dra. exemplo quatro"
+        },
+        "cid": "F41.1",
+        "municipio": "Santos"
+      },
+      "cenario": "golden_legivel_layout_4",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "ruido",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_025",
+      "titulo": "Caso golden sintético 025",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_025.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_025.pdf",
+      "sha256_png": "d0a8e25108643f45c8c11c1d618405258d3bbe27accee13b48630d2bcb5c7463",
+      "sha256_pdf": "dfb47a62680c1a178129129afb1873a4e1ab834588cd8b372165e145b4fb0e1d",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "golden_ilegivel_baixa_luz",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_026",
+      "titulo": "Caso golden sintético 026",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_026.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_026.pdf",
+      "sha256_png": "0f1cb34427ff1d928f104b5c5cd26f097a3a67382ec82f707c05bec2c6b45c90",
+      "sha256_pdf": "115df29318efd1cdc6f07e021062f24f39f21cbd9b0a38d706786d96b2f143c7",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Fabio Souza",
+        "periodo": {
+          "inicio": "2026-04-13",
+          "fim": "2026-04-28"
+        },
+        "data_emissao": "2026-04-13",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "204050",
+          "uf": "SP",
+          "nome": "Dra. exemplo dois"
+        },
+        "cid": "S43.4",
+        "municipio": "São Paulo"
+      },
+      "cenario": "golden_legivel_layout_2",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "ruido",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_027",
+      "titulo": "Caso golden sintético 027",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_027.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_027.pdf",
+      "sha256_png": "49af80e868e15d7c6e0f6c59a6c389bf48e075fb1fe7f96db005eebbd60abcda",
+      "sha256_pdf": "1b6c71c13e9befb82d931481ccbb101fc90c8b0e6c1d280d743dbba57800596a",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Julia Rocha",
+        "periodo": {
+          "inicio": "2026-04-01",
+          "fim": "2026-04-15"
+        },
+        "data_emissao": "2026-04-01",
+        "profissional": {
+          "conselho": "CRO",
+          "numero": "305060",
+          "uf": "SP",
+          "nome": "Dr. exemplo tres"
+        },
+        "cid": "H60.3",
+        "municipio": "Campinas"
+      },
+      "cenario": "golden_legivel_layout_3",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "ruido",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_028",
+      "titulo": "Caso golden sintético 028",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_028.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_028.pdf",
+      "sha256_png": "680412ece226f2d70b48c20edcbbb51372cfd8511c5b123e0ea2daa310cb1fac",
+      "sha256_pdf": "c4fc40ab0f9c6c70e83ca2ec7e4a2d82623932fc3f6042cfa24ab26b1b04085c",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Leo Castro",
+        "periodo": {
+          "inicio": "2026-09-30",
+          "fim": "2026-10-25"
+        },
+        "data_emissao": "2026-09-30",
+        "profissional": {
+          "conselho": "CRP",
+          "numero": "407080",
+          "uf": "SP",
+          "nome": "Dra. exemplo quatro"
+        },
+        "cid": null,
+        "municipio": "Ribeirao Preto"
+      },
+      "cenario": "golden_legivel_layout_4",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "tremida",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_029",
+      "titulo": "Caso golden sintético 029",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_029.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_029.pdf",
+      "sha256_png": "1b3fdb43da0eb46d1c6e6c6491c7bccb3385af8c906d9cac2ecd81ca33fbaea3",
+      "sha256_pdf": "104d229caf7cf380a76f969d8dae244bcaff1ede6ffc9fe9e44438fe0aeb854c",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Mara Brito",
+        "periodo": {
+          "inicio": "2026-06-05",
+          "fim": "2026-06-28"
+        },
+        "data_emissao": "2026-06-05",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "102030",
+          "uf": "SP",
+          "nome": "Dr. exemplo um"
+        },
+        "cid": "J06.9",
+        "municipio": "Santos"
+      },
+      "cenario": "golden_legivel_layout_1",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "ruido",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_030",
+      "titulo": "Caso golden sintético 030",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_030.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_030.pdf",
+      "sha256_png": "3c2afa1e9529a941ff58f37be62ed772cec350865b5777ae0f0ac40632ff3abd",
+      "sha256_pdf": "b602eb67b163c83fc3f5d3d0c7170db6e17983bd95e43d4a2d91e63111232227",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "golden_ilegivel_manchado",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "manchado",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_031",
+      "titulo": "Caso golden sintético 031",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_031.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_031.pdf",
+      "sha256_png": "dd76da578c770293c6c3e9aeded33738a82e3aa305bfac5be07c84e142b9fe42",
+      "sha256_pdf": "cd203f11824de82c673fff259a7249854ec384cf0f3d6aacac688049f51fd3e9",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Ana Nunes",
+        "periodo": {
+          "inicio": "2026-07-25",
+          "fim": "2026-08-04"
+        },
+        "data_emissao": "2026-07-25",
+        "profissional": {
+          "conselho": "CRO",
+          "numero": "305060",
+          "uf": "SP",
+          "nome": "Dr. exemplo tres"
+        },
+        "cid": "F41.1",
+        "municipio": "São Paulo"
+      },
+      "cenario": "golden_legivel_layout_3",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "tremida",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_032",
+      "titulo": "Caso golden sintético 032",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_032.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_032.pdf",
+      "sha256_png": "a8a02dc314218ddd44096dbeede5a0b3b55c77887c0b6b1b11994f1573e69d49",
+      "sha256_pdf": "1f1b27e3259e8ea92079bf0e1ff7fa612827cfaf49eb14aabf0bf1d5e686df40",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Bruno Lima",
+        "periodo": {
+          "inicio": "2026-07-20",
+          "fim": "2026-08-17"
+        },
+        "data_emissao": "2026-07-20",
+        "profissional": {
+          "conselho": "CRP",
+          "numero": "407080",
+          "uf": "SP",
+          "nome": "Dra. exemplo quatro"
+        },
+        "cid": "Z00.0",
+        "municipio": "Campinas"
+      },
+      "cenario": "golden_legivel_layout_4",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "tremida",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_033",
+      "titulo": "Caso golden sintético 033",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_033.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_033.pdf",
+      "sha256_png": "a752b85b93ad237177bf8012fea9f3c88ec79173b34f814dbae5449ab43e46c6",
+      "sha256_pdf": "1fcbc80afebe0fa09fe8e6d71e86a3032ad60978446be02c176c2b27866dd7fa",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Carla Mendes",
+        "periodo": {
+          "inicio": "2026-03-30",
+          "fim": "2026-03-30"
+        },
+        "data_emissao": "2026-03-30",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "102030",
+          "uf": "SP",
+          "nome": "Dr. exemplo um"
+        },
+        "cid": "S43.4",
+        "municipio": "Ribeirao Preto"
+      },
+      "cenario": "golden_legivel_layout_1",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_034",
+      "titulo": "Caso golden sintético 034",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_034.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_034.pdf",
+      "sha256_png": "7b92936ce5505e3dc3979e8ad805c5138210159308a49caa29ac415f1ed3260a",
+      "sha256_pdf": "f5ce114677a1dedf4b3c32c5e5e79bf538c4839cd2b0f65a4091dd07e59634d7",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Diego Alves",
+        "periodo": {
+          "inicio": "2026-06-16",
+          "fim": "2026-07-04"
+        },
+        "data_emissao": "2026-06-16",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "204050",
+          "uf": "SP",
+          "nome": "Dra. exemplo dois"
+        },
+        "cid": "H60.3",
+        "municipio": "Santos"
+      },
+      "cenario": "golden_legivel_layout_2",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "baixa_resolucao",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_035",
+      "titulo": "Caso golden sintético 035",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_035.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_035.pdf",
+      "sha256_png": "07981bd122c55799ec78b4b2deb060125d067be3a557574bfada894ac88a6149",
+      "sha256_pdf": "84973c5a4432c72b9b391ec3cfd1bc91df204548174c8f4f6f702ceb1ff90c8f",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "golden_ilegivel_baixa_luz",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_036",
+      "titulo": "Caso golden sintético 036",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_036.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_036.pdf",
+      "sha256_png": "18df27716d058edf762dee791654657c87245c0161898ff2121e9caf8ba06c72",
+      "sha256_pdf": "46f836382ee19cd9c956e6670eda29c5095ce8acf1a3b0aa39dd14302d776457",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Fabio Souza",
+        "periodo": {
+          "inicio": "2026-07-05",
+          "fim": "2026-07-16"
+        },
+        "data_emissao": "2026-07-05",
+        "profissional": {
+          "conselho": "CRP",
+          "numero": "407080",
+          "uf": "SP",
+          "nome": "Dra. exemplo quatro"
+        },
+        "cid": "J06.9",
+        "municipio": "São Paulo"
+      },
+      "cenario": "golden_legivel_layout_4",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_037",
+      "titulo": "Caso golden sintético 037",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_037.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_037.pdf",
+      "sha256_png": "a3e103998289f274145b26328214ddc78294f4906892f7b04e21931064065d13",
+      "sha256_pdf": "1e0968c3ce8aa792600b57d76fd503e13c2ae847320a031e1c5dee6f46498042",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Julia Rocha",
+        "periodo": {
+          "inicio": "2026-06-24",
+          "fim": "2026-07-14"
+        },
+        "data_emissao": "2026-06-24",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "102030",
+          "uf": "SP",
+          "nome": "Dr. exemplo um"
+        },
+        "cid": "M54.5",
+        "municipio": "Campinas"
+      },
+      "cenario": "golden_legivel_layout_1",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "boa",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_038",
+      "titulo": "Caso golden sintético 038",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_038.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_038.pdf",
+      "sha256_png": "285e2bc3d985b04e56e3eaa6e7ad623e0c11bf593ac1598df1b5ee5316732e23",
+      "sha256_pdf": "920f9ccb55a1fe9e7d1a17eb8eb34ef9f5ee908c27a1fb0d29379181040df9b4",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Leo Castro",
+        "periodo": {
+          "inicio": "2026-01-23",
+          "fim": "2026-01-23"
+        },
+        "data_emissao": "2026-01-23",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "204050",
+          "uf": "SP",
+          "nome": "Dra. exemplo dois"
+        },
+        "cid": "F41.1",
+        "municipio": "Ribeirao Preto"
+      },
+      "cenario": "golden_legivel_layout_2",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "tremida",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_039",
+      "titulo": "Caso golden sintético 039",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_039.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_039.pdf",
+      "sha256_png": "eb7947230e05d6efe8ec340a1ff10cca987b7e17ac76f6dbbc638e2cb0d55bd4",
+      "sha256_pdf": "2aaebbb4c9f6caf9424333becb01b086041c29ace097d3182f2980861ebdf53d",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Mara Brito",
+        "periodo": {
+          "inicio": "2026-10-19",
+          "fim": "2026-11-04"
+        },
+        "data_emissao": "2026-10-19",
+        "profissional": {
+          "conselho": "CRO",
+          "numero": "305060",
+          "uf": "SP",
+          "nome": "Dr. exemplo tres"
+        },
+        "cid": "Z00.0",
+        "municipio": "Santos"
+      },
+      "cenario": "golden_legivel_layout_3",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "tremida",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_040",
+      "titulo": "Caso golden sintético 040",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_040.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_040.pdf",
+      "sha256_png": "ce1074f647567607abbe2fca97cb4e98f480a988a855b213581fa6221da36a8f",
+      "sha256_pdf": "19aab7fe3552455cf413c0bd50a793faa5855506051649d3e206cecc6339499f",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "golden_ilegivel_manchado",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "manchado",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_041",
+      "titulo": "Caso golden sintético 041",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_041.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_041.pdf",
+      "sha256_png": "a420e716aa29fad80fe5a5d54825d4c032e7f9740b52f4bb2b7334af00165075",
+      "sha256_pdf": "7a6b620dc9b18f953561ba59dfa4ca0ac3f033eb10bcfaf6da25f54491073a97",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Ana Nunes",
+        "periodo": {
+          "inicio": "2026-09-12",
+          "fim": "2026-10-10"
+        },
+        "data_emissao": "2026-09-12",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "102030",
+          "uf": "SP",
+          "nome": "Dr. exemplo um"
+        },
+        "cid": "H60.3",
+        "municipio": "São Paulo"
+      },
+      "cenario": "golden_legivel_layout_1",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_042",
+      "titulo": "Caso golden sintético 042",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_042.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_042.pdf",
+      "sha256_png": "c29c0de6bd1f41b3eb45014e14f63b899f8f5b6ab7cb9bbf4387dc0c000ecca2",
+      "sha256_pdf": "1f86de53754ec68be96172992dc67dc7fdfc1430df012b4eb2f49a85b28f28fd",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Bruno Lima",
+        "periodo": {
+          "inicio": "2026-02-04",
+          "fim": "2026-02-23"
+        },
+        "data_emissao": "2026-02-04",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "204050",
+          "uf": "SP",
+          "nome": "Dra. exemplo dois"
+        },
+        "cid": null,
+        "municipio": "Campinas"
+      },
+      "cenario": "golden_legivel_layout_2",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "ruido",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_043",
+      "titulo": "Caso golden sintético 043",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_043.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_043.pdf",
+      "sha256_png": "b57579703fb3faee55de5a30370d04c51b012948d3775fa19bba0f148eb881ce",
+      "sha256_pdf": "6fb755dc0d1064c4515a114e19a2470bb51370dcd9226e3601c1e4111f2da8c9",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Carla Mendes",
+        "periodo": {
+          "inicio": "2026-06-23",
+          "fim": "2026-07-08"
+        },
+        "data_emissao": "2026-06-23",
+        "profissional": {
+          "conselho": "CRO",
+          "numero": "305060",
+          "uf": "SP",
+          "nome": "Dr. exemplo tres"
+        },
+        "cid": "J06.9",
+        "municipio": "Ribeirao Preto"
+      },
+      "cenario": "golden_legivel_layout_3",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "tremida",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_044",
+      "titulo": "Caso golden sintético 044",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_044.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_044.pdf",
+      "sha256_png": "560737bbb937617787336617db67c5fc0c5a6acd12da74851a98699b3bcb9fdb",
+      "sha256_pdf": "80afe650ad94cd53b29d82d957f0e6dc1ed1575fd9c735181dd4655f4fdd4063",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Diego Alves",
+        "periodo": {
+          "inicio": "2026-07-23",
+          "fim": "2026-08-09"
+        },
+        "data_emissao": "2026-07-23",
+        "profissional": {
+          "conselho": "CRP",
+          "numero": "407080",
+          "uf": "SP",
+          "nome": "Dra. exemplo quatro"
+        },
+        "cid": "M54.5",
+        "municipio": "Santos"
+      },
+      "cenario": "golden_legivel_layout_4",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_045",
+      "titulo": "Caso golden sintético 045",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_045.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_045.pdf",
+      "sha256_png": "1ba489b1221ba258446bfd69c96b2e091f6cf4701cc4bef5b9f4d0efbd45c6fd",
+      "sha256_pdf": "bbce2ba8670f21c21a0ae339e68e8105006c29536221eeb8a128c701ddb73c02",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "golden_ilegivel_baixa_luz",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_046",
+      "titulo": "Caso golden sintético 046",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_046.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_046.pdf",
+      "sha256_png": "463370313f59325d584c7088c3890dc5f1461ce5875d73f648e9b4fbad140f8e",
+      "sha256_pdf": "533c362c289f7d647a8b5be11b7016895a7e523445ed0f549adf1e866bbb32db",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Fabio Souza",
+        "periodo": {
+          "inicio": "2026-08-04",
+          "fim": "2026-08-24"
+        },
+        "data_emissao": "2026-08-04",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "204050",
+          "uf": "SP",
+          "nome": "Dra. exemplo dois"
+        },
+        "cid": "Z00.0",
+        "municipio": "São Paulo"
+      },
+      "cenario": "golden_legivel_layout_2",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "boa",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_047",
+      "titulo": "Caso golden sintético 047",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_047.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_047.pdf",
+      "sha256_png": "e13d989962b001a144798b8c16e9ba4c4496e5a8da29a4f4a89b1c552bec3e3e",
+      "sha256_pdf": "3c4e85e0201893bdd35888ff6c5366ff3cfbf623fde95e6a99d15f1c14f796ee",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Julia Rocha",
+        "periodo": {
+          "inicio": "2026-07-17",
+          "fim": "2026-08-09"
+        },
+        "data_emissao": "2026-07-17",
+        "profissional": {
+          "conselho": "CRO",
+          "numero": "305060",
+          "uf": "SP",
+          "nome": "Dr. exemplo tres"
+        },
+        "cid": "S43.4",
+        "municipio": "Campinas"
+      },
+      "cenario": "golden_legivel_layout_3",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "tremida",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_048",
+      "titulo": "Caso golden sintético 048",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_048.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_048.pdf",
+      "sha256_png": "a0ed730c72dc0f37ba28bb63e7ecb93b656c45231ba03d1212019164c63d34a8",
+      "sha256_pdf": "5a2664fe7afda60b75ddb28bb0f543007f38d85d5312fa58453a32d449b5f0ea",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Leo Castro",
+        "periodo": {
+          "inicio": "2026-04-28",
+          "fim": "2026-05-01"
+        },
+        "data_emissao": "2026-04-28",
+        "profissional": {
+          "conselho": "CRP",
+          "numero": "407080",
+          "uf": "SP",
+          "nome": "Dra. exemplo quatro"
+        },
+        "cid": "H60.3",
+        "municipio": "Ribeirao Preto"
+      },
+      "cenario": "golden_legivel_layout_4",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "baixa_resolucao",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_049",
+      "titulo": "Caso golden sintético 049",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_049.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_049.pdf",
+      "sha256_png": "4b3a184a92ecbc86998d84ee9e2db55c66d93f5b880d9e98e1b32929f7e6c74b",
+      "sha256_pdf": "eee43fe326016404a21f3620ba630d0dc3b003f591de6319a28f1c3807fbc075",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Mara Brito",
+        "periodo": {
+          "inicio": "2026-02-22",
+          "fim": "2026-03-15"
+        },
+        "data_emissao": "2026-02-22",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "102030",
+          "uf": "SP",
+          "nome": "Dr. exemplo um"
+        },
+        "cid": null,
+        "municipio": "Santos"
+      },
+      "cenario": "golden_legivel_layout_1",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "boa",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_050",
+      "titulo": "Caso golden sintético 050",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_050.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_050.pdf",
+      "sha256_png": "707823ef4e6dabac30de234bf80979b075b651bf2c0fe24e73a9bcf89713c7ab",
+      "sha256_pdf": "b071762a1ff8837696136f1a1fb4acac8d8ec7c2ef7e1418a1401559a0ce4fab",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "golden_ilegivel_borrada",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "borrada",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_051",
+      "titulo": "Caso golden sintético 051",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_051.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_051.pdf",
+      "sha256_png": "2e0ff1f90acb1b95e436ff55b544fa023101711b360d8d8f44b431135fdfd97e",
+      "sha256_pdf": "1b7094e83f915c58cc8fbc3e6a10b1d7fb34d00c34a5d9853d5f99b75906967a",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Ana Nunes",
+        "periodo": {
+          "inicio": "2026-09-08",
+          "fim": "2026-09-28"
+        },
+        "data_emissao": "2026-09-08",
+        "profissional": {
+          "conselho": "CRO",
+          "numero": "305060",
+          "uf": "SP",
+          "nome": "Dr. exemplo tres"
+        },
+        "cid": "M54.5",
+        "municipio": "São Paulo"
+      },
+      "cenario": "golden_legivel_layout_3",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "ruido",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_052",
+      "titulo": "Caso golden sintético 052",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_052.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_052.pdf",
+      "sha256_png": "28025f3f2a95a44129d415321dfe2975deea3704a830593880a09f2000eb482f",
+      "sha256_pdf": "b8904cf39211ef8485667d6d40c648204cb4f2ed46eb43b908219ec4872fc99b",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Bruno Lima",
+        "periodo": {
+          "inicio": "2026-01-20",
+          "fim": "2026-01-23"
+        },
+        "data_emissao": "2026-01-20",
+        "profissional": {
+          "conselho": "CRP",
+          "numero": "407080",
+          "uf": "SP",
+          "nome": "Dra. exemplo quatro"
+        },
+        "cid": "F41.1",
+        "municipio": "Campinas"
+      },
+      "cenario": "golden_legivel_layout_4",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "boa",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_053",
+      "titulo": "Caso golden sintético 053",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_053.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_053.pdf",
+      "sha256_png": "01330e34e4d81b869590fa4b5a0561321c081b55bc40e151257faa0d9e108984",
+      "sha256_pdf": "df294868b8e97d756ceeda5cbab065d648313bed7921759f7767ab2c436772e2",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Carla Mendes",
+        "periodo": {
+          "inicio": "2026-04-13",
+          "fim": "2026-04-25"
+        },
+        "data_emissao": "2026-04-13",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "102030",
+          "uf": "SP",
+          "nome": "Dr. exemplo um"
+        },
+        "cid": "Z00.0",
+        "municipio": "Ribeirao Preto"
+      },
+      "cenario": "golden_legivel_layout_1",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "tremida",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_054",
+      "titulo": "Caso golden sintético 054",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_054.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_054.pdf",
+      "sha256_png": "5aa6cd5c9246eaf99271da9732d0cd02ee256fee6434792afe9801b8833f3dd5",
+      "sha256_pdf": "c4676a5e9db690a16acbd214cedfcf435507bcdb3a7eb5eec02e6ff727202260",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Diego Alves",
+        "periodo": {
+          "inicio": "2026-05-09",
+          "fim": "2026-06-07"
+        },
+        "data_emissao": "2026-05-09",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "204050",
+          "uf": "SP",
+          "nome": "Dra. exemplo dois"
+        },
+        "cid": "S43.4",
+        "municipio": "Santos"
+      },
+      "cenario": "golden_legivel_layout_2",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "ruido",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_055",
+      "titulo": "Caso golden sintético 055",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_055.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_055.pdf",
+      "sha256_png": "07981bd122c55799ec78b4b2deb060125d067be3a557574bfada894ac88a6149",
+      "sha256_pdf": "9568282b2ff95088778c6723628833d793ac041556890abb3c192b292f407101",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "golden_ilegivel_baixa_luz",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_056",
+      "titulo": "Caso golden sintético 056",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_056.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_056.pdf",
+      "sha256_png": "c735b3c9ef285ec1f4508827a07b3c3eef033a899b0cbd6888ad8d73eaaedb2e",
+      "sha256_pdf": "8042f108dd85e682210a6cf692e3a24a7536a24c16e760b5d2f0edaf0d69dc5f",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Fabio Souza",
+        "periodo": {
+          "inicio": "2026-08-23",
+          "fim": "2026-09-15"
+        },
+        "data_emissao": "2026-08-23",
+        "profissional": {
+          "conselho": "CRP",
+          "numero": "407080",
+          "uf": "SP",
+          "nome": "Dra. exemplo quatro"
+        },
+        "cid": null,
+        "municipio": "São Paulo"
+      },
+      "cenario": "golden_legivel_layout_4",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "tremida",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_057",
+      "titulo": "Caso golden sintético 057",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_057.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_057.pdf",
+      "sha256_png": "d6aa8804486efe5d083973ce2f14f6f8c8cd4e521b10f1f900ba0462a020f294",
+      "sha256_pdf": "aafcf956ddb306932afd4476ecdabbdeca82ea8131d721b85204154fac2792dc",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Julia Rocha",
+        "periodo": {
+          "inicio": "2026-02-02",
+          "fim": "2026-02-15"
+        },
+        "data_emissao": "2026-02-02",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "102030",
+          "uf": "SP",
+          "nome": "Dr. exemplo um"
+        },
+        "cid": "J06.9",
+        "municipio": "Campinas"
+      },
+      "cenario": "golden_legivel_layout_1",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_1",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_058",
+      "titulo": "Caso golden sintético 058",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_058.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_058.pdf",
+      "sha256_png": "b37109417aeacd5f05559f729a75914f7d846034e7fb94e59dd9ff5e4365c0f0",
+      "sha256_pdf": "75242fa9f53618122a009b1c7e6f109a36c335e348b342ea856364772196b2f0",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Leo Castro",
+        "periodo": {
+          "inicio": "2026-11-09",
+          "fim": "2026-11-11"
+        },
+        "data_emissao": "2026-11-09",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "204050",
+          "uf": "SP",
+          "nome": "Dra. exemplo dois"
+        },
+        "cid": "M54.5",
+        "municipio": "Ribeirao Preto"
+      },
+      "cenario": "golden_legivel_layout_2",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_2",
+      "qualidade_foto": "tremida",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_059",
+      "titulo": "Caso golden sintético 059",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_059.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_059.pdf",
+      "sha256_png": "49512bcfeb9fe3015a2b32ea5860abca0ef12116cb4026b21c47e967dbf2c639",
+      "sha256_pdf": "c727ea03cc8c0d365302985563c4d92fd53c44782f556158ea12b191194b78d3",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Mara Brito",
+        "periodo": {
+          "inicio": "2026-09-24",
+          "fim": "2026-09-28"
+        },
+        "data_emissao": "2026-09-24",
+        "profissional": {
+          "conselho": "CRO",
+          "numero": "305060",
+          "uf": "SP",
+          "nome": "Dr. exemplo tres"
+        },
+        "cid": "F41.1",
+        "municipio": "Santos"
+      },
+      "cenario": "golden_legivel_layout_3",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_3",
+      "qualidade_foto": "baixa_resolucao",
+      "anonimizacao": "dados 100% ficticios"
+    },
+    {
+      "id_amostra": "golden_atestado_060",
+      "titulo": "Caso golden sintético 060",
+      "arquivo_png": ".storage/golden-atestados/golden_atestado_060.png",
+      "arquivo_pdf": ".storage/golden-atestados/golden_atestado_060.pdf",
+      "sha256_png": "7869bee12df17133d8db44232d540d25f396278f8bd2ed2393b04f511515e19c",
+      "sha256_pdf": "e8adb0b321024c240535da80d5a13de75dcb479d2504a1e0aa5343b911b916c5",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "golden_ilegivel_baixa_luz",
+      "campos_corrigidos_sugeridos": [],
+      "layout": "layout_4",
+      "qualidade_foto": "baixa_luz",
+      "anonimizacao": "dados 100% ficticios"
+    }
+  ]
+}

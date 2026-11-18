@@ -30,6 +30,7 @@ from sinergia.agentes.a1_recepcao.config import A1Config, obter_config_a1
 from sinergia.agentes.a1_recepcao.extrator_llm import MockLLM
 from sinergia.agentes.a1_recepcao.gerador_sintetico import (
     GabaritoAtestadoSintetico,
+    gerar_atestados_golden,
     garantir_atestados_sinteticos,
 )
 from sinergia.agentes.a1_recepcao.repositorio import (
@@ -751,6 +752,23 @@ def _construir_parser() -> argparse.ArgumentParser:
         help="Gera os 12 pares de atestados sintéticos (.png/.pdf) e o gabarito JSON.",
     )
     parser.add_argument(
+        "--gerar-golden",
+        action="store_true",
+        help="Gera um corpus golden sintético, anonimizado e determinístico.",
+    )
+    parser.add_argument(
+        "--golden-quantidade",
+        type=int,
+        default=60,
+        help="Quantidade de amostras do corpus golden (padrão: 60).",
+    )
+    parser.add_argument(
+        "--golden-seed",
+        type=int,
+        default=20261118,
+        help="Seed determinística do corpus golden.",
+    )
+    parser.add_argument(
         "--sobrescrever",
         action="store_true",
         help="Força regeração dos arquivos não canônicos ao usar --gerar-atestados.",
@@ -785,6 +803,28 @@ def main(argv: list[str] | None = None) -> int:
     parser = _construir_parser()
     args = parser.parse_args(argv)
     cfg = obter_config_a1()
+
+    if args.gerar_golden:
+        destino = Path(".storage/golden-atestados")
+        amostras = gerar_atestados_golden(
+            destino,
+            quantidade=args.golden_quantidade,
+            seed=args.golden_seed,
+            sobrescrever=args.sobrescrever,
+        )
+        print(
+            json.dumps(
+                {
+                    "diretorio": str(destino),
+                    "seed": args.golden_seed,
+                    "total_amostras": len(amostras),
+                    "amostras": [a.model_dump(mode="json") for a in amostras],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
 
     if args.gerar_atestados:
         amostras = garantir_atestados_sinteticos(

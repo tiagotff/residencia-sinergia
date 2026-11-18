@@ -19,7 +19,7 @@ import hashlib
 import json
 import random
 import textwrap
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pymupdf
@@ -72,6 +72,9 @@ class GabaritoAtestadoSintetico(BaseModel):
     esperado: AtestadoExtraido
     cenario: str
     campos_corrigidos_sugeridos: list[str] = Field(default_factory=list)
+    layout: str = "padrao"
+    qualidade_foto: str = "boa"
+    anonimizacao: str = "dados 100% ficticios"
 
 
 _ESPECIFICACOES_ATESTADOS: tuple[_EspecificacaoAmostra, ...] = (
@@ -554,6 +557,285 @@ def _salvar_pdf_da_imagem(caminho_png: Path, caminho_pdf: Path) -> None:
     doc.close()
 
 
+def _fontes_golden() -> tuple[tuple[str, str], ...]:
+    return (
+        ("arial", "C:/Windows/Fonts/arial.ttf"),
+        ("verdana", "C:/Windows/Fonts/verdana.ttf"),
+        ("calibri", "C:/Windows/Fonts/calibri.ttf"),
+        ("times", "C:/Windows/Fonts/times.ttf"),
+        ("segoe", "C:/Windows/Fonts/segoeui.ttf"),
+        ("comic", "C:/Windows/Fonts/comic.ttf"),
+    )
+
+
+def _renderizar_atestado_golden(
+    spec: _EspecificacaoAmostra,
+    rng: random.Random,
+    layout: int,
+) -> Image.Image:
+    largura, altura = 1440, 960
+    imagem = Image.new("RGB", (largura, altura), "white")
+    draw = ImageDraw.Draw(imagem)
+
+    fontes = _fontes_golden()
+    nome_fonte, caminho_fonte = rng.choice(fontes)
+    fonte_clinica = (
+        ImageFont.truetype(caminho_fonte, 32)
+        if Path(caminho_fonte).is_file()
+        else ImageFont.load_default(size=32)
+    )
+    fonte_titulo = (
+        ImageFont.truetype(caminho_fonte, 38)
+        if Path(caminho_fonte).is_file()
+        else ImageFont.load_default(size=38)
+    )
+    fonte_corpo = (
+        ImageFont.truetype(caminho_fonte, 27)
+        if Path(caminho_fonte).is_file()
+        else ImageFont.load_default(size=27)
+    )
+    fonte_marca = _carregar_fonte(20)
+
+    cores = (
+        ((245, 248, 252), (35, 55, 75)),
+        ((248, 245, 238), (82, 58, 38)),
+        ((244, 250, 247), (38, 82, 67)),
+        ((250, 246, 250), (78, 48, 78)),
+    )
+    fundo, cor = cores[layout % len(cores)]
+
+    if layout % 2 == 0:
+        draw.rectangle([(36, 36), (1404, 924)], outline=cor, width=4)
+        draw.rectangle([(36, 36), (1404, 150)], fill=fundo, outline=cor, width=3)
+        draw.text((70, 70), spec.clinica, fill=cor, font=fonte_clinica)
+        y = 190
+    else:
+        draw.rectangle([(36, 36), (340, 924)], fill=fundo, outline=cor, width=4)
+        draw.text((65, 70), spec.clinica, fill=cor, font=fonte_clinica)
+        draw.rectangle([(380, 36), (1404, 924)], outline=cor, width=4)
+        y = 190
+
+    draw.text(
+        (largura - 560, 70),
+        "DADO SINTETICO (IA/TESTES) - ANONIMIZADO",
+        fill=(120, 130, 145),
+        font=fonte_marca,
+    )
+    draw.text((70 if layout % 2 == 0 else 420, y), spec.cabecalho, fill=cor, font=fonte_titulo)
+    y += 80
+    corpo_x = 70 if layout % 2 == 0 else 420
+    if spec.esperado.legibilidade == "ilegivel":
+        draw.text((corpo_x, y), "DOCUMENTO TESTE - TEXTO ILEGIVEL OU INCOMPLETO", fill=(90, 90, 90), font=fonte_corpo)
+        y += 70
+        draw.text((corpo_x, y), spec.corpo, fill=(100, 100, 100), font=fonte_corpo)
+    else:
+        for linha in textwrap.wrap(spec.corpo, width=58 if layout % 2 == 0 else 44):
+            draw.text((corpo_x, y), linha, fill=(20, 20, 20), font=fonte_corpo)
+            y += 42
+
+        if spec.linha_cid:
+            y += 12
+            draw.text((corpo_x, y), spec.linha_cid, fill=(20, 20, 20), font=fonte_corpo)
+            y += 42
+        draw.text((corpo_x, y), spec.local_data, fill=(35, 35, 35), font=fonte_corpo)
+        y += 58
+        draw.line([(corpo_x, y), (corpo_x + 480, y)], fill=(90, 95, 105), width=2)
+        y += 18
+        draw.text((corpo_x, y), spec.profissional_nome, fill=(20, 20, 20), font=fonte_corpo)
+        y += 42
+        draw.text((corpo_x, y), spec.registro_texto, fill=(20, 20, 20), font=fonte_corpo)
+
+    return imagem
+
+
+def _aplicar_qualidade_golden(
+    imagem: Image.Image,
+    qualidade: str,
+    rng: random.Random,
+) -> Image.Image:
+    if qualidade == "tremida":
+        imagem = imagem.rotate(rng.uniform(-1.2, 1.2), fillcolor="white")
+        imagem = imagem.filter(ImageFilter.GaussianBlur(radius=1.0))
+    elif qualidade == "baixa_luz":
+        imagem = Image.eval(imagem, lambda px: max(0, int(px * 0.62)))
+        imagem = imagem.filter(ImageFilter.GaussianBlur(radius=0.8))
+    elif qualidade == "ruido":
+        pixels = imagem.load()
+        for _ in range(3200):
+            px = rng.randint(0, imagem.width - 1)
+            py = rng.randint(0, imagem.height - 1)
+            tom = rng.randint(145, 230)
+            pixels[px, py] = (tom, tom, tom)
+    elif qualidade == "baixa_resolucao":
+        pequena = imagem.resize((720, 480), Image.Resampling.BILINEAR)
+        imagem = pequena.resize(imagem.size, Image.Resampling.NEAREST)
+    elif qualidade == "cortada":
+        recortada = imagem.crop((0, 0, 1380, 820))
+        imagem = Image.new("RGB", imagem.size, "white")
+        imagem.paste(recortada, (40, 60))
+    elif qualidade == "manchado":
+        draw = ImageDraw.Draw(imagem)
+        for _ in range(8):
+            x1 = rng.randint(220, 1100)
+            y1 = rng.randint(160, 760)
+            draw.ellipse((x1, y1, x1 + rng.randint(80, 260), y1 + rng.randint(40, 150)), fill=(35, 35, 35))
+    elif qualidade == "borrada":
+        imagem = imagem.filter(ImageFilter.GaussianBlur(radius=4.5))
+    elif qualidade == "boa":
+        pass
+    return imagem
+
+
+def gerar_atestados_golden(
+    diretorio: Path | None = None,
+    *,
+    quantidade: int = 60,
+    seed: int = 20261118,
+    sobrescrever: bool = True,
+) -> list[GabaritoAtestadoSintetico]:
+    """Gera corpus golden sintético, fictício e determinístico para testes de OCR/LLM."""
+    if quantidade < 1:
+        raise ValueError("quantidade deve ser pelo menos 1")
+
+    destino = diretorio or Path(".storage/golden-atestados")
+    destino.mkdir(parents=True, exist_ok=True)
+    rng = random.Random(seed)
+
+    nomes = (
+        "Ana Nunes",
+        "Bruno Lima",
+        "Carla Mendes",
+        "Diego Alves",
+        "Elisa Ramos",
+        "Fabio Souza",
+        "Julia Rocha",
+        "Leo Castro",
+        "Mara Brito",
+        "Nuno Pires",
+    )
+    clinicas = (
+        ("CLINICA TESTE CENTRAL", "São Paulo"),
+        ("UNIDADE MEDICA FICTICIA", "Campinas"),
+        ("CONSULTORIO EXEMPLAR", "Ribeirao Preto"),
+        ("HOSPITAL ANONIMIZADO", "Santos"),
+        ("CLINICA MODELO LTDA", "Sorocaba"),
+    )
+    profissionais = (
+        ("CRM", "102030", "Dr. exemplo um"),
+        ("CRM", "204050", "Dra. exemplo dois"),
+        ("CRO", "305060", "Dr. exemplo tres"),
+        ("CRP", "407080", "Dra. exemplo quatro"),
+    )
+    cids = ("J06.9", "M54.5", "F41.1", "Z00.0", "S43.4", "H60.3", None)
+    qualidades = ("boa", "ruido", "tremida", "baixa_luz", "baixa_resolucao")
+    qualidades_ilegiveis = ("borrada", "baixa_luz", "cortada", "manchado")
+
+    gabarito: list[GabaritoAtestadoSintetico] = []
+    for indice in range(1, quantidade + 1):
+        legivel = indice % 5 != 0
+        inicio = date(2026, 1, 15) + timedelta(days=rng.randint(0, 300))
+        dias = rng.randint(1, 30)
+        fim = inicio + timedelta(days=dias - 1)
+        nome = nomes[(indice - 1) % len(nomes)]
+        clinica, municipio = clinicas[(indice - 1) % len(clinicas)]
+        conselho, numero, profissional = profissionais[(indice - 1) % len(profissionais)]
+        cid = cids[(indice - 1) % len(cids)]
+        qualidade = (
+            rng.choice(qualidades)
+            if legivel
+            else rng.choice(qualidades_ilegiveis)
+        )
+        layout = (indice - 1) % 4
+        uf = "SP"
+        cabecalho = "ATESTADO MEDICO FICTICIO" if legivel else "DOCUMENTO TESTE"
+
+        if legivel:
+            corpo = (
+                f"Atesto que o(a) paciente {nome} necessita de {dias} "
+                f"({'dia' if dias == 1 else 'dias'}) de afastamento das atividades "
+                f"laborais no periodo de {inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}."
+            )
+            linha_cid = f"CID: {cid}" if cid else None
+            local_data = f"{municipio} - {uf}, {inicio.strftime('%d de %m de %Y')}."
+            registro_texto = f"{conselho}/{uf} {numero}"
+            esperado = AtestadoExtraido(
+                legibilidade="ok",
+                nome_no_documento=nome,
+                periodo=PeriodoAfastamento(inicio=inicio, fim=fim),
+                data_emissao=inicio,
+                profissional=ProfissionalExtraido(
+                    conselho=conselho,
+                    numero=numero,
+                    uf=uf,
+                    nome=profissional,
+                ),
+                cid=cid,
+                municipio=municipio,
+            )
+            cenario = f"golden_legivel_layout_{layout + 1}"
+        else:
+            corpo = "Documento incompleto, sem dados clinicos e sem periodo legivel."
+            linha_cid = None
+            local_data = ""
+            registro_texto = ""
+            esperado = AtestadoExtraido(legibilidade="ilegivel")
+            cenario = f"golden_ilegivel_{qualidade}"
+
+        spec = _EspecificacaoAmostra(
+            id_amostra=f"golden_atestado_{indice:03d}",
+            titulo=f"Caso golden sintético {indice:03d}",
+            cenario=cenario,
+            clinica=clinica,
+            cabecalho=cabecalho,
+            corpo=corpo,
+            linha_cid=linha_cid,
+            local_data=local_data,
+            profissional_nome=profissional,
+            registro_texto=registro_texto,
+            modo_visual=qualidade,
+            esperado=esperado,
+        )
+
+        caminho_png = destino / f"{spec.id_amostra}.png"
+        caminho_pdf = destino / f"{spec.id_amostra}.pdf"
+        if sobrescrever or not caminho_png.is_file():
+            imagem = _renderizar_atestado_golden(spec, rng, layout)
+            imagem = _aplicar_qualidade_golden(imagem, qualidade, rng)
+            imagem.save(caminho_png, format="PNG")
+        if sobrescrever or not caminho_pdf.is_file():
+            _salvar_pdf_da_imagem(caminho_png, caminho_pdf)
+
+        gabarito.append(
+            GabaritoAtestadoSintetico(
+                id_amostra=spec.id_amostra,
+                titulo=spec.titulo,
+                arquivo_png=_formatar_caminho_portavel(caminho_png),
+                arquivo_pdf=_formatar_caminho_portavel(caminho_pdf),
+                sha256_png=_sha256_arquivo(caminho_png),
+                sha256_pdf=_sha256_arquivo(caminho_pdf),
+                esperado=esperado,
+                cenario=cenario,
+                layout=f"layout_{layout + 1}",
+                qualidade_foto=qualidade,
+                anonimizacao="dados 100% ficticios",
+            )
+        )
+
+    manifesto = {
+        "versao": "golden-1.0",
+        "seed": seed,
+        "total_amostras": len(gabarito),
+        "anonimizado": True,
+        "uso": "testes OCR, extracao LLM e avaliacao automatizada",
+        "amostras": [item.model_dump(mode="json") for item in gabarito],
+    }
+    (destino / "gabarito_atestados_golden.json").write_text(
+        json.dumps(manifesto, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return gabarito
+
+
 def garantir_atestados_sinteticos(
     diretorio: Path | None = None,
     *,
@@ -604,7 +886,17 @@ def garantir_atestados_sinteticos(
     manifesto_dados = {
         "versao": "2.2",
         "total_amostras": len(gabarito),
-        "amostras": [item.model_dump(mode="json") for item in gabarito],
+        "amostras": [
+            item.model_dump(
+                mode="json",
+                exclude={
+                    "layout",
+                    "qualidade_foto",
+                    "anonimizacao",
+                },
+            )
+            for item in gabarito
+        ],
     }
     manifesto_path.write_text(
         json.dumps(manifesto_dados, ensure_ascii=False, indent=2) + "\n",

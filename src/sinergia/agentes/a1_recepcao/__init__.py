@@ -9,6 +9,7 @@ from sinergia.agentes.a1_recepcao.extrator_llm import (
 )
 from sinergia.agentes.a1_recepcao.gerador_sintetico import (
     GabaritoAtestadoSintetico,
+    gerar_atestados_golden,
     garantir_atestados_sinteticos,
 )
 from sinergia.agentes.a1_recepcao.ocr import processar_arquivo_atestado
@@ -151,6 +152,7 @@ __all__ = [
     "exportar_json_schemas_a1",
     "extrair_atestado_via_llm",
     "garantir_atestados_sinteticos",
+    "gerar_atestados_golden",
     "gerar_mensagem_confirmacao_extracao",
     "limpar_cache_idempotencia",
     "mesclar_atestado_confirmado",
