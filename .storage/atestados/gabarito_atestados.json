@@ -1,0 +1,332 @@
+{
+  "versao": "2.2",
+  "total_amostras": 12,
+  "amostras": [
+    {
+      "id_amostra": "atestado_carla_105",
+      "titulo": "Atestado médico canônico — Caso 105 (Carla Souza, 3 dias)",
+      "arquivo_png": ".storage/atestados/atestado_carla_105.png",
+      "arquivo_pdf": ".storage/atestados/atestado_carla_105.pdf",
+      "sha256_png": "b5e6b4363c1e2377824c6af62171176c4f0b78b88f789f4425cbf8b7620ed47f",
+      "sha256_pdf": "2395ad8e6e501c172a849895a681f2bcc8eafd3555755569a94aba556847b568",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Carla Souza",
+        "periodo": {
+          "inicio": "2026-11-09",
+          "fim": "2026-11-11"
+        },
+        "data_emissao": "2026-11-09",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "123456",
+          "uf": "SP",
+          "nome": null
+        },
+        "cid": "J06.9",
+        "municipio": "Campinas"
+      },
+      "cenario": "canonico_anexo_d2",
+      "campos_corrigidos_sugeridos": []
+    },
+    {
+      "id_amostra": "atestado_lombar_cid_m545",
+      "titulo": "Atestado médico ortopédico (5 dias, CID M54.5)",
+      "arquivo_png": ".storage/atestados/atestado_lombar_cid_m545.png",
+      "arquivo_pdf": ".storage/atestados/atestado_lombar_cid_m545.pdf",
+      "sha256_png": "18ba65e5fd90b4b4c9dd57737992e7ce04f10d116140e0553a6fe3df6aa28246",
+      "sha256_pdf": "95f8656397bd968dbd191c41dc5cbe8d91e6b5b5d3bcfd298f0ce547fe6b69bf",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Carla Souza",
+        "periodo": {
+          "inicio": "2026-11-16",
+          "fim": "2026-11-20"
+        },
+        "data_emissao": "2026-11-16",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "654321",
+          "uf": "SP",
+          "nome": null
+        },
+        "cid": "M54.5",
+        "municipio": "Campinas"
+      },
+      "cenario": "afastamento_lombar_com_cid",
+      "campos_corrigidos_sugeridos": []
+    },
+    {
+      "id_amostra": "atestado_sem_cid_crm",
+      "titulo": "Atestado médico sem CID (sigilo médico CFM 1.658/2002)",
+      "arquivo_png": ".storage/atestados/atestado_sem_cid_crm.png",
+      "arquivo_pdf": ".storage/atestados/atestado_sem_cid_crm.pdf",
+      "sha256_png": "937495bb8889f65dc5e24b60c25ab3d2e133bca1223fb25ec657f0e768d1c1aa",
+      "sha256_pdf": "97c081a42bf5d3c1c4c7d688479687258148b8983738a4ecb52880037ada18d7",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Carla Souza",
+        "periodo": {
+          "inicio": "2026-11-23",
+          "fim": "2026-11-24"
+        },
+        "data_emissao": "2026-11-23",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "334455",
+          "uf": "SP",
+          "nome": null
+        },
+        "cid": null,
+        "municipio": "Campinas"
+      },
+      "cenario": "sem_cid_sigilo_medico",
+      "campos_corrigidos_sugeridos": []
+    },
+    {
+      "id_amostra": "atestado_odontologico_cro",
+      "titulo": "Atestado odontológico (1 dia, CRO/SP)",
+      "arquivo_png": ".storage/atestados/atestado_odontologico_cro.png",
+      "arquivo_pdf": ".storage/atestados/atestado_odontologico_cro.pdf",
+      "sha256_png": "892b8311a2f6dbf3154caf179637b4509be297c784c45d79497f4750ffcf4686",
+      "sha256_pdf": "a3b43a1487a940ba15801a74ee2e0a78f5a2c42b24b6c01b5b768e76b9610066",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Carla Souza",
+        "periodo": {
+          "inicio": "2026-11-25",
+          "fim": "2026-11-25"
+        },
+        "data_emissao": "2026-11-25",
+        "profissional": {
+          "conselho": "CRO",
+          "numero": "98765",
+          "uf": "SP",
+          "nome": null
+        },
+        "cid": "Z00.0",
+        "municipio": "São Paulo"
+      },
+      "cenario": "odontologico_cro",
+      "campos_corrigidos_sugeridos": []
+    },
+    {
+      "id_amostra": "atestado_psicologico_crp",
+      "titulo": "Atestado psicológico (7 dias, CRP/SP, CID F41.1)",
+      "arquivo_png": ".storage/atestados/atestado_psicologico_crp.png",
+      "arquivo_pdf": ".storage/atestados/atestado_psicologico_crp.pdf",
+      "sha256_png": "cf8f0972841292b8012afc0ca24204c2ee129c0a79ca871dedcf5418cbf36a7b",
+      "sha256_pdf": "33e066f4a8902d7471d65b452f8f28e5e3041aa1db5f07121e8abf0ab60f88e4",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Carla Souza",
+        "periodo": {
+          "inicio": "2026-12-01",
+          "fim": "2026-12-07"
+        },
+        "data_emissao": "2026-12-01",
+        "profissional": {
+          "conselho": "CRP",
+          "numero": "54321",
+          "uf": "SP",
+          "nome": null
+        },
+        "cid": "F41.1",
+        "municipio": "Campinas"
+      },
+      "cenario": "psicologico_crp",
+      "campos_corrigidos_sugeridos": []
+    },
+    {
+      "id_amostra": "declaracao_comparecimento_1dia",
+      "titulo": "Declaração de comparecimento (1 dia, CRM/SP)",
+      "arquivo_png": ".storage/atestados/declaracao_comparecimento_1dia.png",
+      "arquivo_pdf": ".storage/atestados/declaracao_comparecimento_1dia.pdf",
+      "sha256_png": "9a7c550ba8f347693d1158f313b3e726fa2a097acd0b91f9f1c3858a137fac7c",
+      "sha256_pdf": "58787f7b293dbbbe5cf6c3c930a6eccfa73b6ca48a710ce7756cbc42a83bd0c9",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Carla Souza",
+        "periodo": {
+          "inicio": "2026-12-10",
+          "fim": "2026-12-10"
+        },
+        "data_emissao": "2026-12-10",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "778899",
+          "uf": "SP",
+          "nome": null
+        },
+        "cid": "Z00.0",
+        "municipio": "São Paulo"
+      },
+      "cenario": "declaracao_comparecimento",
+      "campos_corrigidos_sugeridos": []
+    },
+    {
+      "id_amostra": "atestado_ruido_leve_manual",
+      "titulo": "Atestado com ruído leve de digitalização (revisão manual)",
+      "arquivo_png": ".storage/atestados/atestado_ruido_leve_manual.png",
+      "arquivo_pdf": ".storage/atestados/atestado_ruido_leve_manual.pdf",
+      "sha256_png": "79fe2aae3ff5a90725719cb11cf39ce4d01797cfdd0e9527ba9624239874a561",
+      "sha256_pdf": "e6d9634d88cac45e59b08484b8f085ded27a71f00a5c17cdc124941fa736c8b2",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Carla Souza",
+        "periodo": {
+          "inicio": "2026-12-14",
+          "fim": "2026-12-17"
+        },
+        "data_emissao": "2026-12-14",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "112233",
+          "uf": "SP",
+          "nome": null
+        },
+        "cid": null,
+        "municipio": "Campinas"
+      },
+      "cenario": "ruido_leve_revisao_manual",
+      "campos_corrigidos_sugeridos": [
+        "periodo.fim"
+      ]
+    },
+    {
+      "id_amostra": "atestado_inss_nr7_30dias",
+      "titulo": "Atestado médico longo (30 dias — marco INSS e exame retorno NR-07)",
+      "arquivo_png": ".storage/atestados/atestado_inss_nr7_30dias.png",
+      "arquivo_pdf": ".storage/atestados/atestado_inss_nr7_30dias.pdf",
+      "sha256_png": "68918ac774d43819169f94a614c6131d604e61d322ad5aafad60788dde188e4b",
+      "sha256_pdf": "b9227f5cb3eb5751b361eef4089f1cebc0e932e0a8aceb2398bcc66310ad8c3e",
+      "esperado": {
+        "legibilidade": "ok",
+        "nome_no_documento": "Carla Souza",
+        "periodo": {
+          "inicio": "2026-11-01",
+          "fim": "2026-11-30"
+        },
+        "data_emissao": "2026-11-01",
+        "profissional": {
+          "conselho": "CRM",
+          "numero": "445566",
+          "uf": "SP",
+          "nome": null
+        },
+        "cid": "M54.5",
+        "municipio": "Campinas"
+      },
+      "cenario": "afastamento_longo_inss_nr7",
+      "campos_corrigidos_sugeridos": []
+    },
+    {
+      "id_amostra": "atestado_borrado_ilegivel",
+      "titulo": "Imagem borrada / foto tremida (ilegível)",
+      "arquivo_png": ".storage/atestados/atestado_borrado_ilegivel.png",
+      "arquivo_pdf": ".storage/atestados/atestado_borrado_ilegivel.pdf",
+      "sha256_png": "cde75ba43136a06b194c0bc849bef2db9cfe908d218066467dd357ca18e6ebeb",
+      "sha256_pdf": "c02138ef5e97327172ac2fb3db9c1676601ff48782fa86a13ed134e6803365bf",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "ilegivel_borrado",
+      "campos_corrigidos_sugeridos": []
+    },
+    {
+      "id_amostra": "atestado_escuro_subexposto",
+      "titulo": "Foto escura / subexposta de baixo contraste (ilegível)",
+      "arquivo_png": ".storage/atestados/atestado_escuro_subexposto.png",
+      "arquivo_pdf": ".storage/atestados/atestado_escuro_subexposto.pdf",
+      "sha256_png": "5649bd9fb8c8a3778355d876e8e9b6738fddadfd742f2ddb376c08a4df710ab3",
+      "sha256_pdf": "c05237abadfc5b86747e2afed51f81953228f554cc7deb2a9bf109821f349c54",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "ilegivel_subexposto",
+      "campos_corrigidos_sugeridos": []
+    },
+    {
+      "id_amostra": "atestado_cortado_incompleto",
+      "titulo": "Foto cortada sem datas e sem CRM (ilegível / incompleto)",
+      "arquivo_png": ".storage/atestados/atestado_cortado_incompleto.png",
+      "arquivo_pdf": ".storage/atestados/atestado_cortado_incompleto.pdf",
+      "sha256_png": "47bae1524dbcd91306f81e7dff55df11ece4a86bbcfff1e5e1dae75ee091dae2",
+      "sha256_pdf": "d63364e9e820bba547f1f55d5cfd3e3ef5c9e2790c56f65f9c96efa9d1b8d80c",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "ilegivel_cortado",
+      "campos_corrigidos_sugeridos": []
+    },
+    {
+      "id_amostra": "atestado_manchado_rasurado",
+      "titulo": "Documento manchado/rasurado sobre datas e CRM (ilegível)",
+      "arquivo_png": ".storage/atestados/atestado_manchado_rasurado.png",
+      "arquivo_pdf": ".storage/atestados/atestado_manchado_rasurado.pdf",
+      "sha256_png": "aa5f839e6cf6ca8a12bbba086b8b2032e16b04682ebf8d8d11095df01e21861a",
+      "sha256_pdf": "7e78ce007fb72069050fb144fe30822974b981efd9684ef65f9bd42cfdd4596f",
+      "esperado": {
+        "legibilidade": "ilegivel",
+        "nome_no_documento": null,
+        "periodo": {
+          "inicio": null,
+          "fim": null
+        },
+        "data_emissao": null,
+        "profissional": {
+          "conselho": null,
+          "numero": null,
+          "uf": null,
+          "nome": null
+        },
+        "cid": null,
+        "municipio": null
+      },
+      "cenario": "ilegivel_rasurado",
+      "campos_corrigidos_sugeridos": []
+    }
+  ]
+}

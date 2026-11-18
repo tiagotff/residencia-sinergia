@@ -7,6 +7,10 @@ from sinergia.agentes.a1_recepcao.extrator_llm import (
     extrair_atestado_via_llm,
     obter_cliente_llm,
 )
+from sinergia.agentes.a1_recepcao.gerador_sintetico import (
+    GabaritoAtestadoSintetico,
+    garantir_atestados_sinteticos,
+)
 from sinergia.agentes.a1_recepcao.ocr import processar_arquivo_atestado
 from sinergia.agentes.a1_recepcao.prompts import (
     SYSTEM_PROMPT_CONVERSAR_A1,
@@ -102,6 +106,7 @@ __all__ = [
     "EstadoCasoAfastamento",
     "EventoEmitido",
     "FonteCitada",
+    "GabaritoAtestadoSintetico",
     "LegibilidadeDocumento",
     "MarcosLegaisAfastamento",
     "MockLLM",
@@ -145,6 +150,7 @@ __all__ = [
     "executar",
     "exportar_json_schemas_a1",
     "extrair_atestado_via_llm",
+    "garantir_atestados_sinteticos",
     "gerar_mensagem_confirmacao_extracao",
     "limpar_cache_idempotencia",
     "mesclar_atestado_confirmado",
