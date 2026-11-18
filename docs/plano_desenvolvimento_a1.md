@@ -263,10 +263,10 @@ sequenceDiagram
 - [ ] **Task 3.1 — Testes Automatizados de Contrato e Regras (`pytest`):**
   - Validar que toda `TAREFA` das fixtures e todo `RESULTADO` produzido por `executar(tarefa)` passam 100% no JSON Schema do protocolo `sinergia/1` (**Anexo F**).
   - Testar idempotência por `id_mensagem`, detecção de divergências, erro de `fim < inicio`, `origem = "IA"` vs `"MANUAL"`, e baixa física.
-- [ ] **Task 3.2 — Avaliação das Métricas da Seção 10 (pág. 14 / linha 453):**
-  - Rodar a bateria de atestados sintéticos legíveis pelo pipeline `OCR -> ChatGroq` e medir:
-    - **Atestados extraídos sem correção manual $\ge 80\%$**
-    - **Atestados físicos baixados no prazo $\ge 90\%$**
+- [x] **Task 3.2 — Avaliação das Métricas da Seção 10 (pág. 14 / linha 453):**
+  - Avaliador dedicado [`avaliacao_metricas.py`](../src/sinergia/agentes/a1_recepcao/avaliacao_metricas.py) e relatório consolidado em [`docs/relatorio_metricas_a1_secao10.md`](relatorio_metricas_a1_secao10.md) cobrindo `.png` e `.pdf` das 12 amostras sintéticas:
+    - **Atestados extraídos sem correção manual $\ge 80\%$:** **100,0%** na extração bruta exata (`8/8` PNG e `8/8` PDF) e **87,5%** (`7/8` por formato) com `origem = "IA"` mesmo simulando revisão manual (`origem = "MANUAL"`) no caso `atestado_ruido_leve_manual`; **100,0%** (`4/4` em PNG/PDF) dos ilegíveis rejeitados com `0` gravações no BD.
+    - **Atestados físicos baixados no prazo $\ge 90\%$:** **100,0%** no lote nominal (`8/8` PNG e `8/8` PDF) e **90,0%** (`9/10`) no cenário estendido com 1 atraso simulado para detecção do alerta `A3.5`.
 - [ ] **Task 3.3 — Preenchimento das Pendências na `Documentação - SinergIA v2.2.docx` e Pull Request:**
   - **Seção 5.3:** Inserir o prompt completo de extração (`[Anexar o prompt completo de extração, disponível no repositório (agentes/a1_recepcao/).]`).
   - **Seção 9:** Preencher a IDE utilizada e detalhar os testes de contrato, unitários e de integração do A1.
@@ -323,6 +323,8 @@ Esta seção registra o setup local validado na branch `feat/a1-recepcao` (Task 
   - `garantir_atestados_sinteticos()` gera 12 pares `.png`/`.pdf` em `.storage/atestados/` com marca d'água e manifesto `gabarito_atestados.json` (preservando intacto o SHA-256 canônico de `atestado_carla_105.png`), cobrindo 8 amostras legíveis (`CRM`, `CRO`, `CRP`, com e sem CID, declaração de comparecimento, ruído leve de digitalização e afastamento longo de 30 dias INSS/NR-7) e 4 modos distintos de ilegibilidade (`borrado`, `subexposto`, `cortado` e `manchado/rasurado`).
 - **[`cli_demo.py`](../src/sinergia/agentes/a1_recepcao/cli_demo.py) (Task `2B.2`):**
   - Simulador CLI/interativo (`python -m sinergia.agentes.a1_recepcao.cli_demo`) com detecção automática de PostgreSQL 16 / `RepositorioA1Memoria` e `ChatGroq` / `MockLLM`, suportando `--roteiro carla`, `--avaliar-metricas`, `--gerar-atestados`, `--tarefa <json>` e menu interativo no terminal.
+- **[`avaliacao_metricas.py`](../src/sinergia/agentes/a1_recepcao/avaliacao_metricas.py) e [`relatorio_metricas_a1_secao10.md`](relatorio_metricas_a1_secao10.md) (Task `3.2`):**
+  - Módulo executável (`python -m sinergia.agentes.a1_recepcao.avaliacao_metricas`) e relatório consolidado da Seção 10 cobrindo validação criptográfica `SHA-256` dos 24 arquivos (`.png` e `.pdf`) contra `gabarito_atestados.json`, replays de idempotência por `id_mensagem`, proteção a `status == "ERRO"` com fallback *human-in-the-loop* para `--modo-llm groq`, acurácia por campo de `AtestadoExtraido`, alternância de `POLITICA_EXTRAIR_CID`, rejeição nos 4 modos de ilegibilidade e cenário estendido de 10 baixas físicas com 1 atraso para rastreabilidade do alerta `A3.5`.
 - **[`validador.py`](../src/sinergia/agentes/a1_recepcao/validador.py) (Task `1B.1`):**
   - `nomes_compativeis(nome_documento, nome_cadastro)`: normaliza acentos/conectivos e aceita sobrenome abreviado (ex.: `"Carla S."` $\leftrightarrow$ `"Carla Souza"`).
   - `detectar_divergencias(extraido, registro_inicial)` e `gerar_mensagem_confirmacao_extracao(extraido, divergencias)`: confronta `dias`, `inicio` e `nome` sem rejeitar sumariamente o documento (`Anexo E.2` / Mahbub et al., 2026).
