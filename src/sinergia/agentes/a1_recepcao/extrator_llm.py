@@ -77,7 +77,10 @@ _RE_CONSELHO = re.compile(
     r"\b(CRM|CRO|CRP)\s*[/\-\s]?\s*([A-Z]{2})?\s*[/\-\s:]?\s*(\d{3,10})\s*(?:[/\-\s]?\s*([A-Z]{2}))?",
     re.IGNORECASE,
 )
-_RE_CID = re.compile(r"\bCID(?:-10)?\s*[:\-]?\s*([A-Z]\d{2}(?:\.\d{1,2})?)\b", re.IGNORECASE)
+_RE_CID = re.compile(
+    r"\bCID(?:-10)?\s*[:\-]?\s*([A-Z][A-Z0-9]{2}(?:\.[A-Z0-9]{1,2})?)\b",
+    re.IGNORECASE,
+)
 _RE_CONTATO = re.compile(
     r"(telefone|celular|whatsapp|e-?mail|@|\(\d{2}\)\s*\d{4,5}[-\s]?\d{4})",
     re.IGNORECASE,
@@ -177,7 +180,16 @@ def _extrair_atestado_deterministico(mensagens: Any) -> AtestadoExtraido:
     if extrair_cid:
         match_cid = _RE_CID.search(texto_ocr)
         if match_cid:
-            cid = match_cid.group(1).upper()
+            bruto = match_cid.group(1).upper()
+            partes = bruto.split(".", 1)
+            base = partes[0]
+            if len(base) == 3:
+                base = base[0] + base[1:].replace("O", "0").replace("I", "1")
+            if len(partes) == 2:
+                decimal = partes[1].replace("O", "0").replace("I", "1")
+                cid = f"{base}.{decimal}"
+            else:
+                cid = base
 
     nome_paciente = None
     match_nome = re.search(
