@@ -49,6 +49,25 @@ _RE_MSG_TAG = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 _RE_DATA_BR = re.compile(r"\b(\d{2})/(\d{2})/(\d{4})\b")
+_RE_DATA_EXTENSO = re.compile(
+    r"\b(\d{1,2})\s+de\s+(janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+de\s+(\d{4})\b",
+    re.IGNORECASE,
+)
+_MESES_PT = {
+    "janeiro": 1,
+    "fevereiro": 2,
+    "marco": 3,
+    "março": 3,
+    "abril": 4,
+    "maio": 5,
+    "junho": 6,
+    "julho": 7,
+    "agosto": 8,
+    "setembro": 9,
+    "outubro": 10,
+    "novembro": 11,
+    "dezembro": 12,
+}
 _RE_INTERVALO_BR = re.compile(
     r"(\d{2}/\d{2}/\d{4})\s*(?:a|at[eé]|-)\s*(\d{2}/\d{2}/\d{4})",
     re.IGNORECASE,
@@ -127,9 +146,24 @@ def _extrair_atestado_deterministico(mensagens: Any) -> AtestadoExtraido:
         else:
             fim = inicio
 
-    data_emissao = datas[-1] if datas else inicio
-    if match_intervalo and len(datas) == 2:
-        data_emissao = inicio
+    data_emissao: date | None = None
+    match_extenso = _RE_DATA_EXTENSO.search(texto_ocr)
+    if match_extenso:
+        mes_num = _MESES_PT.get(match_extenso.group(2).lower())
+        if mes_num is not None:
+            try:
+                data_emissao = date(
+                    int(match_extenso.group(3)),
+                    mes_num,
+                    int(match_extenso.group(1)),
+                )
+            except ValueError:
+                data_emissao = None
+    if data_emissao is None:
+        if match_intervalo and datas and datas[-1] == fim:
+            data_emissao = inicio
+        else:
+            data_emissao = datas[-1] if datas else inicio
 
     conselho = numero = uf = None
     match_prof = _RE_CONSELHO.search(texto_ocr)
@@ -300,7 +334,12 @@ def _criar_chat_groq_cacheado(
     temperature: float,
 ) -> ChatGroq:
     """Cria e reutiliza o cliente `ChatGroq` uma única vez por configuração (Anexo C.2)."""
-    return ChatGroq(model=modelo, api_key=api_key, temperature=temperature)
+    return ChatGroq(
+        model=modelo,
+        api_key=api_key,
+        temperature=temperature,
+        max_retries=6,
+    )
 
 
 def obter_cliente_llm(
