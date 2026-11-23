@@ -25,15 +25,20 @@ Sua única tarefa é ler o texto bruto obtido via OCR (ou camada textual de PDF)
 
 ### Regras Obrigatórias de Preenchimento
 
-1. **`legibilidade` (`"ok"` | `"ilegivel"`):**
+1. **`tipo_documento` (`"atestado_medico"` | `"declaracao_comparecimento"` | `"outro"`):**
+   - Use `"atestado_medico"` para atestados médicos, odontológicos ou psicológicos com indicação de afastamento.
+   - Use `"declaracao_comparecimento"` para declarações de comparecimento/atendimento sem afastamento de múltiplos dias.
+   - Use `"outro"` caso o documento não se enquadre nas categorias anteriores.
+
+2. **`legibilidade` (`"ok"` | `"ilegivel"`):**
    - Use `"ok"` apenas quando o texto em `<texto_ocr>` contiver conteúdo legível suficiente para identificar um documento de atendimento/afastamento (ex.: indicação de atestado/declaração, paciente ou período/data ou emissor).
    - Use `"ilegivel"` quando o texto estiver vazio, marcado como `[TEXTO OCR VAZIO — DOCUMENTO SEM CONTEÚDO LEGÍVEL]`, corrompido, truncado, sem palavras inteligíveis ou quando a qualidade impossibilitar a leitura segura dos dados essenciais. Neste caso, todos os campos extraídos (`nome_no_documento`, `periodo.inicio`, `periodo.fim`, `data_emissao`, `profissional.*`, `cid`, `municipio`) devem ser `null`.
 
-2. **`nome_no_documento`:**
+3. **`nome_no_documento`:**
    - Transcreva o nome do paciente exatamente como impresso/escrito no documento.
    - Se não constar ou estiver ilegível, retorne `null`.
 
-3. **`periodo.inicio` e `periodo.fim` (formato ISO `YYYY-MM-DD`):**
+4. **`periodo.inicio` e `periodo.fim` (formato ISO `YYYY-MM-DD`):**
    - Preencha `inicio` e `fim` com datas no formato `YYYY-MM-DD`.
    - **Cálculo inclusivo obrigatório quando houver data de início + quantidade de dias `N`:**
      `fim = inicio + (N - 1) dias`.
@@ -41,22 +46,22 @@ Sua única tarefa é ler o texto bruto obtido via OCR (ou camada textual de PDF)
    - Se for uma declaração de comparecimento de um único dia sem período adicional, `inicio` e `fim` devem corresponder à data do atendimento (ou `null` se a data não estiver legível).
    - Se apenas a quantidade de dias aparecer sem data de início ou de emissão legível para ancorar o início, deixe as datas ausentes como `null`.
 
-4. **`data_emissao` (formato ISO `YYYY-MM-DD`):**
+5. **`data_emissao` (formato ISO `YYYY-MM-DD`):**
    - Extraia a data em que o documento foi emitido/assinado. Se não constar claramente, retorne `null`.
 
-5. **`profissional` (`conselho`, `numero`, `uf`, `nome`):**
+6. **`profissional` (`conselho`, `numero`, `uf`, `nome`):**
    - `conselho`: sigla padronizada em maiúsculas (`"CRM"`, `"CRO"` ou `"CRP"`, ou outra sigla explícita no documento).
    - `numero`: apenas o número/identificador de registro no conselho (sem repetir a sigla nem a UF).
    - `uf`: sigla da UF do registro profissional com 2 letras maiúsculas (ex.: `"SP"`).
    - `nome`: nome do profissional de saúde emissor, se legível; caso contrário, `null`.
 
-6. **`cid` (Política de CID — Anexo G):**
+7. **`cid` (Política de CID — Anexo G):**
 {bloco_politica_cid}
 
-7. **`municipio`:**
+8. **`municipio`:**
    - Nome do município de emissão conforme impresso no cabeçalho, rodapé ou local/data do documento (sem a UF). Se não constar, retorne `null`.
 
-8. **`confianca_campos`:**
+9. **`confianca_campos`:**
    - Informe um mapa com a confiança estimada entre `0.0` e `1.0` para cada campo analisado:
      `"nome_no_documento"`, `"periodo.inicio"`, `"periodo.fim"`, `"data_emissao"`,
      `"profissional.conselho"`, `"profissional.numero"`, `"profissional.uf"`, `"cid"`, `"municipio"`.

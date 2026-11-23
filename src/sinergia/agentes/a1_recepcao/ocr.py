@@ -38,32 +38,58 @@ def _resolver_arquivo(arquivo_uri: str) -> Path:
     """Resolve caminho relativo ao armazenamento privado ou um URI file://."""
     if not isinstance(arquivo_uri, str) or not arquivo_uri.strip():
         raise ValueError("arquivo_uri não pode ser vazio.")
+    if "\x00" in arquivo_uri:
+        raise ValueError("arquivo_uri inválido: contém byte nulo.")
 
     uri = arquivo_uri.strip()
+    if uri.startswith(("\\\\", "//")):
+        raise ValueError("Caminhos UNC de rede não são permitidos por segurança.")
+
     caminho_nativo = Path(uri)
     if caminho_nativo.is_absolute():
+        return caminho_nativo.expanduser().resolve(strict=False)
+
+    parsed = urlparse(uri)
+    if parsed.scheme and parsed.scheme.lower() != "file":
+        raise ValueError("Somente arquivos locais ou URIs file:// são aceitos.")
+    if parsed.scheme:
+        if parsed.netloc and parsed.netloc.lower() not in {"", "localhost"}:
+            raise ValueError(
+                "URIs file:// com host remoto não são permitidas por segurança."
+            )
+        caminho = Path(url2pathname(parsed.path))
+        return caminho.expanduser().resolve(strict=False)
+
+    storage_dir = obter_config_a1().atestados_storage_dir
+    ja_prefixado = bool(
+        storage_dir.parts
+        and caminho_nativo.parts[: len(storage_dir.parts)] == storage_dir.parts
+    )
+    if ja_prefixado or caminho_nativo.exists():
         caminho = caminho_nativo
     else:
-        parsed = urlparse(uri)
-        if parsed.scheme and parsed.scheme.lower() != "file":
-            raise ValueError("Somente arquivos locais ou URIs file:// são aceitos.")
-        if parsed.scheme:
-            if parsed.netloc and parsed.netloc not in {"", "localhost"}:
-                caminho = Path(url2pathname(f"//{parsed.netloc}{parsed.path}"))
-            else:
-                caminho = Path(url2pathname(parsed.path))
-        else:
-            storage_dir = obter_config_a1().atestados_storage_dir
-            ja_prefixado = bool(
-                storage_dir.parts
-                and caminho_nativo.parts[: len(storage_dir.parts)] == storage_dir.parts
-            )
-            if ja_prefixado or caminho_nativo.exists():
-                caminho = caminho_nativo
-            else:
-                caminho = storage_dir / caminho_nativo
+        caminho = storage_dir / caminho_nativo
 
-    return caminho.expanduser().resolve(strict=False)
+    resolvido = caminho.expanduser().resolve(strict=False)
+    storage_resolvido = storage_dir.expanduser().resolve(strict=False)
+    cwd_resolvido = Path.cwd().resolve(strict=False)
+    if ".." in caminho_nativo.parts and not resolvido.is_relative_to(storage_resolvido):
+        raise ValueError(
+            "Caminho de arquivo fora do diretório de armazenamento permitido "
+            "(path traversal bloqueado)."
+        )
+    if not (
+        resolvido.is_relative_to(storage_resolvido)
+        or (
+            (ja_prefixado or caminho_nativo.exists())
+            and resolvido.is_relative_to(cwd_resolvido)
+        )
+    ):
+        raise ValueError(
+            "Caminho de arquivo fora do diretório de armazenamento permitido "
+            "(path traversal bloqueado)."
+        )
+    return resolvido
 
 
 def _calcular_sha256(caminho: Path) -> str:
@@ -164,17 +190,43 @@ def _ocr_imagem(imagem: Image.Image) -> tuple[str, float | None]:
     return _executar_rapidocr(imagem)
 
 
+class _ErroLimitePaginasPDF(ValueError):
+    """Indica que o PDF excede o limite de páginas configurado para atestados."""
+
+
+def _assinatura_valida(caminho: Path, mime_detectado: str) -> bool:
+    """Valida magic bytes básicos do arquivo antes da decodificação."""
+    try:
+        with caminho.open("rb") as arq:
+            cabecalho = arq.read(8)
+    except OSError:
+        return False
+
+    if mime_detectado == "image/png":
+        return cabecalho.startswith(b"\x89PNG\r\n\x1a\n")
+    if mime_detectado == "image/jpeg":
+        return cabecalho.startswith(b"\xff\xd8\xff")
+    if mime_detectado == "application/pdf":
+        return cabecalho.startswith(b"%PDF-")
+    return False
+
+
 def _processar_imagem(caminho: Path) -> tuple[str, float | None]:
     try:
         with Image.open(caminho) as imagem:
             imagem.load()
             imagem = imagem.convert("RGB")
             return _ocr_imagem(imagem)
-    except (UnidentifiedImageError, OSError, ValueError) as exc:
+    except (
+        UnidentifiedImageError,
+        Image.DecompressionBombError,
+        OSError,
+        ValueError,
+    ) as exc:
         raise ValueError(f"Arquivo de imagem corrompido ou ilegível: {exc}") from exc
 
 
-def _processar_pdf(caminho: Path) -> tuple[str, float | None]:
+def _processar_pdf(caminho: Path, max_paginas: int = 5) -> tuple[str, float | None]:
     if pymupdf is None:
         raise RuntimeError("Dependência PDF indisponível: instale pymupdf.")
 
@@ -188,8 +240,18 @@ def _processar_pdf(caminho: Path) -> tuple[str, float | None]:
     try:
         if documento.page_count == 0:
             return "", 0.0
+        if documento.page_count > max_paginas:
+            raise _ErroLimitePaginasPDF(
+                f"PDF excede o limite máximo de {max_paginas} páginas para atestados."
+            )
 
         for pagina in documento:
+            texto_nativo = pagina.get_text("text").strip()
+            if len(texto_nativo) >= 20:
+                textos.append(texto_nativo)
+                confiancas.append(1.0)
+                continue
+
             pixmap = pagina.get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0), alpha=False)
             imagem = Image.frombytes(
                 "RGB", (pixmap.width, pixmap.height), pixmap.samples
@@ -213,6 +275,7 @@ def processar_arquivo_atestado(
     sha256_esperado: str | None = None,
 ) -> ResultadoOCR:
     """Calcula o hash e executa OCR em imagem PNG/JPEG ou PDF."""
+    cfg = obter_config_a1()
     caminho = _resolver_arquivo(arquivo_uri)
     if not caminho.is_file():
         raise FileNotFoundError(f"Arquivo de atestado não encontrado: {caminho}")
@@ -227,6 +290,12 @@ def processar_arquivo_atestado(
             f"Tipo de arquivo não suportado: {mime_detectado or caminho.suffix}"
         )
 
+    tamanho_bytes = caminho.stat().st_size
+    if tamanho_bytes > cfg.max_arquivo_bytes:
+        raise ValueError(
+            f"Arquivo excede o limite máximo permitido de {cfg.max_arquivo_bytes} bytes."
+        )
+
     sha256_calculado = _calcular_sha256(caminho)
     if sha256_esperado:
         esperado = sha256_esperado.strip().lower()
@@ -239,11 +308,23 @@ def processar_arquivo_atestado(
         if sha256_calculado != esperado:
             raise ValueError("Hash SHA-256 do arquivo não corresponde ao esperado.")
 
+    if not _assinatura_valida(caminho, mime_detectado):
+        return ResultadoOCR(
+            arquivo_uri=str(caminho),
+            mime=mime_detectado,
+            sha256=sha256_calculado,
+            texto_extraido="",
+            confianca_media=0.0,
+            legibilidade="ilegivel",
+        )
+
     try:
         if mime_detectado == "application/pdf":
-            texto, confianca = _processar_pdf(caminho)
+            texto, confianca = _processar_pdf(caminho, max_paginas=cfg.max_paginas_pdf)
         else:
             texto, confianca = _processar_imagem(caminho)
+    except _ErroLimitePaginasPDF as exc:
+        raise ValueError(str(exc)) from exc
     except (OSError, ValueError):
         return ResultadoOCR(
             arquivo_uri=str(caminho),

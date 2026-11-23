@@ -1,5 +1,7 @@
 """Pacote do Agente A1 — Recepção e Processamento (`sinergia/1`)."""
 
+from sinergia.agentes.a1_recepcao.api import app as app_a1
+from sinergia.agentes.a1_recepcao.api import criar_app_a1
 from sinergia.agentes.a1_recepcao.config import A1Config, obter_config_a1
 from sinergia.agentes.a1_recepcao.extrator_llm import (
     MockLLM,
@@ -9,8 +11,8 @@ from sinergia.agentes.a1_recepcao.extrator_llm import (
 )
 from sinergia.agentes.a1_recepcao.gerador_sintetico import (
     GabaritoAtestadoSintetico,
-    gerar_atestados_golden,
     garantir_atestados_sinteticos,
+    gerar_atestados_golden,
 )
 from sinergia.agentes.a1_recepcao.ocr import processar_arquivo_atestado
 from sinergia.agentes.a1_recepcao.prompts import (
@@ -26,7 +28,11 @@ from sinergia.agentes.a1_recepcao.prompts import (
 )
 from sinergia.agentes.a1_recepcao.repositorio import (
     DadosColaboradorCadastro,
+    RegistroArquivoAtestadoDB,
     RegistroAtestadoDB,
+    RegistroBaixaFisicaDB,
+    RegistroCampoAtestadoDB,
+    RegistroCidRestritoDB,
     RepositorioA1Memoria,
     RepositorioA1Postgres,
     RepositorioA1Protocol,
@@ -35,6 +41,7 @@ from sinergia.agentes.a1_recepcao.schemas import (
     PROTOCOLO_SINERGIA,
     AcaoA1,
     AtestadoExtraido,
+    CampoMetadado,
     ContextoTarefa,
     CorrelacaoEnvelope,
     DecisaoAgente,
@@ -68,6 +75,7 @@ from sinergia.agentes.a1_recepcao.schemas import (
     exportar_json_schemas_a1,
 )
 from sinergia.agentes.a1_recepcao.servico import (
+    AgenteA1,
     ServicoA1,
     executar,
     limpar_cache_idempotencia,
@@ -95,8 +103,10 @@ __all__ = [
     "UFS_BRASIL",
     "A1Config",
     "AcaoA1",
+    "AgenteA1",
     "AnaliseConversaA1",
     "AtestadoExtraido",
+    "CampoMetadado",
     "ContextoTarefa",
     "CorrelacaoEnvelope",
     "DadosColaboradorCadastro",
@@ -123,7 +133,11 @@ __all__ = [
     "PayloadProcessarDocumentoTarefa",
     "PeriodoAfastamento",
     "ProfissionalExtraido",
+    "RegistroArquivoAtestadoDB",
     "RegistroAtestadoDB",
+    "RegistroBaixaFisicaDB",
+    "RegistroCampoAtestadoDB",
+    "RegistroCidRestritoDB",
     "RegistroInicialCaso",
     "RepositorioA1Memoria",
     "RepositorioA1Postgres",
@@ -138,6 +152,7 @@ __all__ = [
     "TarefaA1",
     "TipoDocumentoAfastamento",
     "analisar_conversa_atestado",
+    "app_a1",
     "calcular_marcos_legais",
     "calcular_prazo_entrega_fisica",
     "cid_sintaxe_valida",
@@ -147,6 +162,7 @@ __all__ = [
     "construir_prompt_sistema_extracao",
     "construir_prompt_usuario_conversar",
     "construir_prompt_usuario_extracao",
+    "criar_app_a1",
     "detectar_divergencias",
     "executar",
     "exportar_json_schemas_a1",

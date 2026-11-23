@@ -187,6 +187,19 @@ def detectar_divergencias(
             )
         )
 
+    if (
+        extraido.tipo_documento
+        and registro_inicial.tipo_solicitacao
+        and extraido.tipo_documento != registro_inicial.tipo_solicitacao
+    ):
+        divergencias.append(
+            DivergenciaCampo(
+                campo="tipo_documento",
+                no_documento=extraido.tipo_documento,
+                informado=registro_inicial.tipo_solicitacao,
+            )
+        )
+
     return divergencias
 
 
@@ -225,7 +238,17 @@ def mesclar_atestado_confirmado(
         nome=prof_conf.nome if prof_conf.nome is not None else prof_base.nome,
     )
 
+    tipo_doc = (
+        confirmado.tipo_documento
+        if "tipo_documento" in confirmado.model_fields_set
+        else base_extraida.tipo_documento
+    )
+    campos_mesclados = (
+        dict(confirmado.campos) if confirmado.campos else dict(base_extraida.campos)
+    )
+
     return AtestadoExtraido(
+        tipo_documento=tipo_doc,
         legibilidade=confirmado.legibilidade,
         nome_no_documento=(
             confirmado.nome_no_documento
@@ -245,12 +268,26 @@ def mesclar_atestado_confirmado(
             if confirmado.municipio is not None
             else base_extraida.municipio
         ),
+        campos=campos_mesclados,
         confianca_campos=(
             confirmado.confianca_campos
             if confirmado.confianca_campos is not None
             else base_extraida.confianca_campos
         ),
     )
+
+
+_LABELS_CAMPOS_BAIXA_CONFIANCA: dict[str, str] = {
+    "nome_no_documento": "nome no documento",
+    "periodo.inicio": "data de início",
+    "periodo.fim": "data de término",
+    "data_emissao": "data de emissão",
+    "profissional.conselho": "conselho profissional",
+    "profissional.numero": "número do registro profissional",
+    "profissional.uf": "UF do registro profissional",
+    "cid": "código CID",
+    "municipio": "município",
+}
 
 
 def gerar_mensagem_confirmacao_extracao(
@@ -264,6 +301,17 @@ def gerar_mensagem_confirmacao_extracao(
             "Pode enviar uma foto ou PDF mais nítido e sem cortes?"
         )
 
+    campos_ileg = [
+        _LABELS_CAMPOS_BAIXA_CONFIANCA.get(nome_campo, nome_campo)
+        for nome_campo, meta in extraido.campos.items()
+        if meta.vazio_por_baixa_confianca
+    ]
+    sufixo_baixa_conf = (
+        f" Também não consegui ler com segurança: {', '.join(campos_ileg)}."
+        if campos_ileg
+        else ""
+    )
+
     inicio = extraido.periodo.inicio
     fim = extraido.periodo.fim
 
@@ -272,7 +320,7 @@ def gerar_mensagem_confirmacao_extracao(
         if div.campo == "dias" and inicio is not None and fim is not None:
             return (
                 f"Li no atestado {div.no_documento} dias ({inicio:%d/%m} a {fim:%d/%m}), "
-                f"mas você informou {div.informado}. Qual está certo?"
+                f"mas você informou {div.informado}. Qual está certo?{sufixo_baixa_conf}"
             )
         if div.campo == "inicio" and inicio is not None:
             data_inf = div.informado
@@ -282,12 +330,12 @@ def gerar_mensagem_confirmacao_extracao(
                 data_inf_fmt = str(data_inf)
             return (
                 f"Li no atestado início em {inicio:%d/%m}, mas você informou "
-                f"{data_inf_fmt}. Qual data está correta?"
+                f"{data_inf_fmt}. Qual data está correta?{sufixo_baixa_conf}"
             )
         if div.campo == "nome":
             return (
                 f"O nome lido no documento foi '{div.no_documento}', diferente do "
-                f"seu cadastro ('{div.informado}'). Confirma se este atestado é seu?"
+                f"seu cadastro ('{div.informado}'). Confirma se este atestado é seu?{sufixo_baixa_conf}"
             )
 
     if divergencias:
@@ -297,17 +345,17 @@ def gerar_mensagem_confirmacao_extracao(
         )
         return (
             f"Encontrei diferenças entre o atestado e o informado inicialmente ({itens}). "
-            "Pode revisar e confirmar os dados corretos?"
+            f"Pode revisar e confirmar os dados corretos?{sufixo_baixa_conf}"
         )
 
     if inicio is not None and fim is not None:
         dias = extraido.periodo.dias_calculados
         return (
             f"Li seu atestado de {inicio:%d/%m} a {fim:%d/%m} ({dias} dia(s)). "
-            "Os dados extraídos estão corretos para eu registrar?"
+            f"Os dados extraídos estão corretos para eu registrar?{sufixo_baixa_conf}"
         )
 
-    return "Extraí os dados do seu atestado. Pode revisar e confirmar as informações?"
+    return f"Extraí os dados do seu atestado. Pode revisar e confirmar as informações?{sufixo_baixa_conf}"
 
 
 def _eh_dia_util(data: date, feriados: frozenset[date]) -> bool:
@@ -355,6 +403,15 @@ class MarcosLegaisAfastamento(BaseModel):
     exige_encaminhamento_inss: bool
     data_marco_16_dia: date | None = None
     exige_exame_retorno_nr7: bool
+
+    def codigos_prazos_legais(self) -> list[str]:
+        """Retorna os códigos de marcos legais padronizados do Guia A1 v0.7."""
+        codigos: list[str] = []
+        if self.exige_encaminhamento_inss:
+            codigos.append("inss_16_dias")
+        if self.exige_exame_retorno_nr7:
+            codigos.append("exame_retorno")
+        return codigos
 
 
 def calcular_marcos_legais(

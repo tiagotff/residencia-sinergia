@@ -17,7 +17,8 @@
     "id_atestado": 311,
     "status_atestado": "CONFIRMADO",
     "origem": "IA",
-    "prazo_entrega_fisica": "2026-11-16"
+    "prazo_entrega_fisica": "2026-11-16",
+    "prazos_legais": []
   },
   "saidas": [
     {
@@ -31,7 +32,8 @@
       "dados": {
         "id_caso": 105,
         "id_atestado": 311,
-        "dias": 3
+        "dias": 3,
+        "prazos_legais": []
       }
     }
   ],

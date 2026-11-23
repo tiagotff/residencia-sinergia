@@ -28,7 +28,8 @@
       "nivel_detalhe": "individual",
       "texto": "Entendi, Carla. Pode me enviar uma foto do atestado?",
       "fontes": [],
-      "agendar_para": null
+      "agendar_para": null,
+      "sensivel": false
     }
   ],
   "eventos": [],

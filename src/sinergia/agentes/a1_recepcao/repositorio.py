@@ -19,12 +19,18 @@ Fornece duas implementações aderentes ao mesmo `Protocol`:
 from __future__ import annotations
 
 import unicodedata
+from collections.abc import Collection, Sequence
+from contextlib import nullcontext
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Protocol, Self, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from sinergia.agentes.a1_recepcao.schemas import OrigemDadosAtestado, StatusAtestadoDB
+from sinergia.agentes.a1_recepcao.schemas import (
+    OrigemDadosAtestado,
+    StatusAtestadoDB,
+    TipoDocumentoAfastamento,
+)
 from sinergia.agentes.a1_recepcao.validador import UFS_BRASIL
 
 try:
@@ -93,15 +99,17 @@ class DadosColaboradorCadastro(BaseModel):
 
 
 class RegistroAtestadoDB(BaseModel):
-    """Espelho tipado da tabela `afastamento.atestado` (`001_schema_inicial.sql`)."""
+    """Espelho tipado da tabela `afastamento.atestado` (`001` + `003` v0.7)."""
 
     model_config = ConfigDict(extra="forbid")
 
     id_atestado: int
+    id_caso: int | None = None
     id_colaborador: int
     id_profissional: int
     codigo_cid: str | None = None
     id_municipio: int
+    tipo_documento: TipoDocumentoAfastamento = "atestado_medico"
     data_emissao: date
     inicio_afastamento: datetime
     fim_afastamento: datetime
@@ -110,8 +118,16 @@ class RegistroAtestadoDB(BaseModel):
     status: StatusAtestadoDB
     postado_em: datetime
     prazo_entrega_fisica: date | None = None
+    prazos_legais: list[str] = Field(default_factory=list)
     recebido_fisico_em: datetime | None = None
     recebido_fisico_por: int | None = None
+
+    @field_validator("prazos_legais", mode="before")
+    @classmethod
+    def _normalizar_prazos_legais(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        return list(v)
 
     @model_validator(mode="after")
     def _validar_restricoes_check(self) -> Self:
@@ -124,6 +140,61 @@ class RegistroAtestadoDB(BaseModel):
                 "recebido_fisico_em e recebido_fisico_por devem ser preenchidos juntos."
             )
         return self
+
+
+class RegistroArquivoAtestadoDB(BaseModel):
+    """Espelho tipado de `afastamento.atestado_arquivo` (Guia A1 v0.7)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id_arquivo: int
+    id_atestado: int
+    id_caso: int | None = None
+    id_colaborador: int
+    arquivo_uri: str
+    mime: str | None = None
+    sha256: str
+    enviado_em: datetime
+
+
+class RegistroCampoAtestadoDB(BaseModel):
+    """Espelho tipado de `afastamento.atestado_campo` (Guia A1 v0.7)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id_campo: int
+    id_atestado: int
+    id_caso: int | None = None
+    nome_campo: str
+    valor_extraido: str | None = None
+    valor_confirmado: str | None = None
+    confianca: float | None = Field(default=None, ge=0.0, le=1.0)
+    origem: OrigemDadosAtestado = "IA"
+    vazio_por_baixa_confianca: bool = False
+    atualizado_em: datetime
+
+
+class RegistroBaixaFisicaDB(BaseModel):
+    """Espelho tipado de `afastamento.baixa_fisica` (Guia A1 v0.7)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id_baixa: int
+    id_atestado: int
+    id_usuario_rh: int
+    recebido_por: str
+    data_hora: datetime
+    registrado_em: datetime
+
+
+class RegistroCidRestritoDB(BaseModel):
+    """Espelho tipado de `afastamento.cid_restrito` (Guia A1 v0.7 / LGPD Art. 11)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id_atestado: int
+    codigo_cid: str
+    registrado_em: datetime
 
 
 @runtime_checkable
@@ -146,11 +217,22 @@ class RepositorioA1Protocol(Protocol):
 
     def validar_conselho_profissional(self, sigla: str, uf: str) -> int | None: ...
 
+    def listar_conselhos_validos(self, uf: str) -> tuple[str, ...]: ...
+
+    def obter_profissional(self, id_profissional: int) -> dict[str, Any] | None: ...
+
+    def obter_municipio(self, id_municipio: int) -> tuple[str, str] | None: ...
+
     def validar_cid(
         self, codigo_cid: str | None, *, politica_extrair_cid: bool = True
     ) -> str | None: ...
 
-    def resolver_id_usuario(self, identificador: int | str) -> int: ...
+    def resolver_id_usuario(
+        self,
+        identificador: int | str,
+        *,
+        perfis_permitidos: Collection[str] | None = None,
+    ) -> int: ...
 
     def obter_ou_criar_profissional_saude(
         self,
@@ -164,6 +246,8 @@ class RepositorioA1Protocol(Protocol):
         self,
         arquivo_uri: str,
         id_colaborador: int | None = None,
+        *,
+        sha256: str | None = None,
     ) -> RegistroAtestadoDB | None: ...
 
     def listar_atestados_sobrepostos(
@@ -193,6 +277,11 @@ class RepositorioA1Protocol(Protocol):
         arquivo_uri: str,
         codigo_cid: str | None = None,
         origem_dados: OrigemDadosAtestado = "IA",
+        arquivo_sha256: str | None = None,
+        id_caso: int | None = None,
+        tipo_documento: TipoDocumentoAfastamento = "atestado_medico",
+        arquivo_mime: str | None = None,
+        politica_cid_restrito: bool = True,
     ) -> RegistroAtestadoDB: ...
 
     def obter_atestado(self, id_atestado: int) -> RegistroAtestadoDB | None: ...
@@ -213,6 +302,9 @@ class RepositorioA1Protocol(Protocol):
         id_profissional: int | None = _NAO_INFORMADO,
         codigo_cid: str | None = _NAO_INFORMADO,
         id_municipio: int | None = _NAO_INFORMADO,
+        tipo_documento: TipoDocumentoAfastamento | None = _NAO_INFORMADO,
+        prazos_legais: Sequence[str] | None = _NAO_INFORMADO,
+        politica_cid_restrito: bool = True,
     ) -> RegistroAtestadoDB: ...
 
     def registrar_baixa_fisica_no_banco(
@@ -220,7 +312,48 @@ class RepositorioA1Protocol(Protocol):
         id_atestado: int,
         recebido_fisico_por: int | str,
         recebido_fisico_em: datetime | str,
+        *,
+        perfis_permitidos: Collection[str] | None = ("RH", "ADMIN"),
     ) -> RegistroAtestadoDB: ...
+
+    def registrar_arquivo_atestado(
+        self,
+        id_atestado: int,
+        *,
+        id_colaborador: int,
+        arquivo_uri: str,
+        sha256: str,
+        mime: str | None = None,
+        id_caso: int | None = None,
+    ) -> RegistroArquivoAtestadoDB: ...
+
+    def listar_arquivos_atestado(
+        self, id_atestado: int
+    ) -> list[RegistroArquivoAtestadoDB]: ...
+
+    def salvar_campos_atestado(
+        self,
+        id_atestado: int,
+        campos: Sequence[dict[str, Any]],
+        *,
+        id_caso: int | None = None,
+    ) -> list[RegistroCampoAtestadoDB]: ...
+
+    def listar_campos_atestado(
+        self, id_atestado: int
+    ) -> list[RegistroCampoAtestadoDB]: ...
+
+    def obter_baixa_fisica(
+        self, id_atestado: int
+    ) -> RegistroBaixaFisicaDB | None: ...
+
+    def salvar_cid_restrito(
+        self, id_atestado: int, codigo_cid: str | None
+    ) -> RegistroCidRestritoDB | None: ...
+
+    def obter_cid_restrito(
+        self, id_atestado: int
+    ) -> RegistroCidRestritoDB | None: ...
 
 
 def _colaborador_ativo_no_periodo(
@@ -263,14 +396,19 @@ def _somar_dias_janela_60d(
 class RepositorioA1Postgres:
     """Repositório PostgreSQL 16 estritamente restrito às tabelas do Anexo C.2."""
 
-    def __init__(self, database_url: str) -> None:
-        if psycopg is None:
+    def __init__(self, database_url: str = "", *, conn: Any | None = None) -> None:
+        if conn is None and psycopg is None:
             raise RuntimeError(
                 "Driver psycopg não encontrado. Instale com: pip install 'psycopg[binary]'"
             )
         self._database_url = database_url
+        self._conn = conn
+        self._sha256_por_chave: dict[tuple[int, str], int] = {}
+        self._sha256_global: dict[str, int] = {}
 
     def _conectar(self) -> Any:
+        if self._conn is not None:
+            return nullcontext(self._conn)
         return psycopg.connect(self._database_url, row_factory=dict_row)
 
     def conferir_colaborador_ativo(
@@ -395,6 +533,51 @@ class RepositorioA1Postgres:
             row = cur.fetchone()
             return int(row["id_conselho"]) if row is not None else None
 
+    def listar_conselhos_validos(self, uf: str) -> tuple[str, ...]:
+        uf_norm = uf.strip().upper()
+        if not uf_norm:
+            return ()
+        sql = """
+            SELECT DISTINCT UPPER(cp.sigla) AS sigla
+            FROM afastamento.conselho_profissional cp
+            JOIN cadastro.uf u ON u.sigla_uf = %s
+            ORDER BY sigla
+        """
+        with self._conectar() as conn, conn.cursor() as cur:
+            cur.execute(sql, (uf_norm,))
+            rows = cur.fetchall()
+            return tuple(str(r["sigla"]) for r in rows if r.get("sigla"))
+
+    def obter_profissional(self, id_profissional: int) -> dict[str, Any] | None:
+        sql = """
+            SELECT cp.sigla AS conselho,
+                   ps.numero_registro AS numero,
+                   ps.sigla_uf AS uf,
+                   ps.nome
+            FROM afastamento.profissional_saude ps
+            JOIN afastamento.conselho_profissional cp ON cp.id_conselho = ps.id_conselho
+            WHERE ps.id_profissional = %s
+            LIMIT 1
+        """
+        with self._conectar() as conn, conn.cursor() as cur:
+            cur.execute(sql, (id_profissional,))
+            row = cur.fetchone()
+            return dict(row) if row is not None else None
+
+    def obter_municipio(self, id_municipio: int) -> tuple[str, str] | None:
+        sql = """
+            SELECT nome, sigla_uf
+            FROM cadastro.municipio
+            WHERE id_municipio = %s
+            LIMIT 1
+        """
+        with self._conectar() as conn, conn.cursor() as cur:
+            cur.execute(sql, (id_municipio,))
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return str(row["nome"]), str(row["sigla_uf"])
+
     def validar_cid(
         self, codigo_cid: str | None, *, politica_extrair_cid: bool = True
     ) -> str | None:
@@ -412,12 +595,34 @@ class RepositorioA1Postgres:
             row = cur.fetchone()
             return str(row["codigo_cid"]) if row is not None else None
 
-    def resolver_id_usuario(self, identificador: int | str) -> int:
+    def _validar_perfil_usuario(
+        self,
+        row: dict[str, Any],
+        identificador: int | str,
+        perfis_permitidos: Collection[str] | None,
+    ) -> None:
+        if perfis_permitidos is None:
+            return
+        perfil_row = row.get("perfil")
+        if perfil_row is None:
+            return
+        permitidos = {p.strip().upper() for p in perfis_permitidos if p.strip()}
+        if str(perfil_row).strip().upper() not in permitidos:
+            raise PermissionError(
+                f"Usuário {identificador!r} (perfil={perfil_row}) não autorizado para esta operação."
+            )
+
+    def resolver_id_usuario(
+        self,
+        identificador: int | str,
+        *,
+        perfis_permitidos: Collection[str] | None = None,
+    ) -> int:
         with self._conectar() as conn, conn.cursor() as cur:
             if isinstance(identificador, int) and not isinstance(identificador, bool):
                 cur.execute(
                     """
-                    SELECT id_usuario
+                    SELECT id_usuario, perfil
                     FROM cadastro.usuario
                     WHERE id_usuario = %s AND ativo = TRUE
                     """,
@@ -425,6 +630,7 @@ class RepositorioA1Postgres:
                 )
                 row = cur.fetchone()
                 if row is not None:
+                    self._validar_perfil_usuario(row, identificador, perfis_permitidos)
                     return int(row["id_usuario"])
                 raise ValueError(f"Usuário não encontrado ou inativo: {identificador!r}")
 
@@ -435,7 +641,7 @@ class RepositorioA1Postgres:
             if texto.isdigit():
                 cur.execute(
                     """
-                    SELECT id_usuario
+                    SELECT id_usuario, perfil
                     FROM cadastro.usuario
                     WHERE id_usuario = %s AND ativo = TRUE
                     """,
@@ -443,11 +649,12 @@ class RepositorioA1Postgres:
                 )
                 row = cur.fetchone()
                 if row is not None:
+                    self._validar_perfil_usuario(row, identificador, perfis_permitidos)
                     return int(row["id_usuario"])
 
             cur.execute(
                 """
-                SELECT id_usuario
+                SELECT id_usuario, perfil
                 FROM cadastro.usuario
                 WHERE LOWER(TRIM(login)) = LOWER(TRIM(%s)) AND ativo = TRUE
                 LIMIT 1
@@ -456,6 +663,7 @@ class RepositorioA1Postgres:
             )
             row = cur.fetchone()
             if row is not None:
+                self._validar_perfil_usuario(row, identificador, perfis_permitidos)
                 return int(row["id_usuario"])
 
         raise ValueError(f"Usuário não encontrado ou inativo: {identificador!r}")
@@ -498,7 +706,53 @@ class RepositorioA1Postgres:
         self,
         arquivo_uri: str,
         id_colaborador: int | None = None,
+        *,
+        sha256: str | None = None,
     ) -> RegistroAtestadoDB | None:
+        if sha256 and sha256.strip():
+            sha_norm = sha256.strip().lower()
+            with self._conectar() as conn, conn.cursor() as cur:
+                if id_colaborador is not None:
+                    cur.execute(
+                        """
+                        SELECT a.*
+                        FROM afastamento.atestado_arquivo aa
+                        JOIN afastamento.atestado a ON a.id_atestado = aa.id_atestado
+                        WHERE aa.sha256 = %s
+                          AND aa.id_colaborador = %s
+                          AND a.status <> 'REJEITADO'
+                        ORDER BY aa.enviado_em DESC, aa.id_arquivo DESC
+                        LIMIT 1
+                        """,
+                        (sha_norm, id_colaborador),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT a.*
+                        FROM afastamento.atestado_arquivo aa
+                        JOIN afastamento.atestado a ON a.id_atestado = aa.id_atestado
+                        WHERE aa.sha256 = %s
+                          AND a.status <> 'REJEITADO'
+                        ORDER BY aa.enviado_em DESC, aa.id_arquivo DESC
+                        LIMIT 1
+                        """,
+                        (sha_norm,),
+                    )
+                row_sha = cur.fetchone()
+                if row_sha is not None:
+                    return RegistroAtestadoDB(**row_sha)
+
+            id_at = (
+                self._sha256_por_chave.get((id_colaborador, sha_norm))
+                if id_colaborador is not None
+                else self._sha256_global.get(sha_norm)
+            )
+            if id_at is not None:
+                reg = self.obter_atestado(id_at)
+                if reg is not None and reg.status != "REJEITADO":
+                    return reg
+
         uri_limpa = arquivo_uri.strip()
         if not uri_limpa:
             return None
@@ -569,16 +823,22 @@ class RepositorioA1Postgres:
     ) -> int:
         inicio_janela = data_referencia - timedelta(days=60)
         sql = """
-            SELECT *
-            FROM afastamento.atestado
-            WHERE id_colaborador = %s
-              AND status = 'CONFIRMADO'
-              AND (fim_afastamento AT TIME ZONE 'UTC')::date >= %s
-              AND (inicio_afastamento AT TIME ZONE 'UTC')::date <= %s
+            SELECT a.*, COALESCE(cr.codigo_cid, a.codigo_cid) AS codigo_cid_efetivo
+            FROM afastamento.atestado a
+            LEFT JOIN afastamento.cid_restrito cr ON cr.id_atestado = a.id_atestado
+            WHERE a.id_colaborador = %s
+              AND a.status = 'CONFIRMADO'
+              AND (a.fim_afastamento AT TIME ZONE 'UTC')::date >= %s
+              AND (a.inicio_afastamento AT TIME ZONE 'UTC')::date <= %s
         """
+        atestados: list[RegistroAtestadoDB] = []
         with self._conectar() as conn, conn.cursor() as cur:
             cur.execute(sql, (id_colaborador, inicio_janela, data_referencia))
-            atestados = [RegistroAtestadoDB(**row) for row in cur.fetchall()]
+            for row in cur.fetchall():
+                dados = dict(row)
+                cid_efetivo = dados.pop("codigo_cid_efetivo", dados.get("codigo_cid"))
+                dados["codigo_cid"] = cid_efetivo
+                atestados.append(RegistroAtestadoDB(**dados))
         return _somar_dias_janela_60d(atestados, data_referencia, cid)
 
     def salvar_atestado_pendente(
@@ -593,6 +853,11 @@ class RepositorioA1Postgres:
         arquivo_uri: str,
         codigo_cid: str | None = None,
         origem_dados: OrigemDadosAtestado = "IA",
+        arquivo_sha256: str | None = None,
+        id_caso: int | None = None,
+        tipo_documento: TipoDocumentoAfastamento = "atestado_medico",
+        arquivo_mime: str | None = None,
+        politica_cid_restrito: bool = True,
     ) -> RegistroAtestadoDB:
         uri_limpa = arquivo_uri.strip()
         if not uri_limpa:
@@ -602,12 +867,15 @@ class RepositorioA1Postgres:
         if dt_fim < dt_inicio or _para_data(dt_fim) < _para_data(dt_inicio):
             raise ValueError("fim_afastamento não pode ser anterior a inicio_afastamento.")
 
+        codigo_cid_tabela = None if politica_cid_restrito else codigo_cid
         sql = """
             INSERT INTO afastamento.atestado (
+                id_caso,
                 id_colaborador,
                 id_profissional,
                 codigo_cid,
                 id_municipio,
+                tipo_documento,
                 data_emissao,
                 inicio_afastamento,
                 fim_afastamento,
@@ -615,17 +883,19 @@ class RepositorioA1Postgres:
                 origem_dados,
                 status
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'PENDENTE')
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'PENDENTE')
             RETURNING *
         """
         with self._conectar() as conn, conn.cursor() as cur:
             cur.execute(
                 sql,
                 (
+                    id_caso,
                     id_colaborador,
                     id_profissional,
-                    codigo_cid,
+                    codigo_cid_tabela,
                     id_municipio,
+                    tipo_documento,
                     data_emissao,
                     dt_inicio,
                     dt_fim,
@@ -634,8 +904,43 @@ class RepositorioA1Postgres:
                 ),
             )
             row = cur.fetchone()
+            registro = RegistroAtestadoDB(**row)
+
+            if politica_cid_restrito and codigo_cid is not None:
+                cur.execute(
+                    """
+                    INSERT INTO afastamento.cid_restrito (id_atestado, codigo_cid)
+                    VALUES (%s, %s)
+                    ON CONFLICT (id_atestado)
+                    DO UPDATE SET codigo_cid = EXCLUDED.codigo_cid,
+                                  registrado_em = now()
+                    """,
+                    (registro.id_atestado, codigo_cid),
+                )
+
+            if arquivo_sha256 and arquivo_sha256.strip():
+                sha_norm = arquivo_sha256.strip().lower()
+                cur.execute(
+                    """
+                    INSERT INTO afastamento.atestado_arquivo (
+                        id_atestado, id_caso, id_colaborador, arquivo_uri, mime, sha256
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        registro.id_atestado,
+                        id_caso,
+                        id_colaborador,
+                        uri_limpa,
+                        arquivo_mime,
+                        sha_norm,
+                    ),
+                )
+                self._sha256_por_chave[(id_colaborador, sha_norm)] = registro.id_atestado
+                self._sha256_global[sha_norm] = registro.id_atestado
+
             conn.commit()
-            return RegistroAtestadoDB(**row)
+            return registro
 
     def obter_atestado(self, id_atestado: int) -> RegistroAtestadoDB | None:
         sql = "SELECT * FROM afastamento.atestado WHERE id_atestado = %s"
@@ -671,6 +976,9 @@ class RepositorioA1Postgres:
         id_profissional: int | None = _NAO_INFORMADO,
         codigo_cid: str | None = _NAO_INFORMADO,
         id_municipio: int | None = _NAO_INFORMADO,
+        tipo_documento: TipoDocumentoAfastamento | None = _NAO_INFORMADO,
+        prazos_legais: Sequence[str] | None = _NAO_INFORMADO,
+        politica_cid_restrito: bool = True,
     ) -> RegistroAtestadoDB:
         dt_inicio = _para_inicio_timestamptz(inicio_afastamento)
         dt_fim = _para_fim_timestamptz(fim_afastamento)
@@ -697,10 +1005,16 @@ class RepositorioA1Postgres:
             params.append(id_profissional)
         if codigo_cid is not _NAO_INFORMADO:
             set_clauses.append("codigo_cid = %s")
-            params.append(codigo_cid)
+            params.append(None if politica_cid_restrito else codigo_cid)
         if id_municipio is not _NAO_INFORMADO and id_municipio is not None:
             set_clauses.append("id_municipio = %s")
             params.append(id_municipio)
+        if tipo_documento is not _NAO_INFORMADO and tipo_documento is not None:
+            set_clauses.append("tipo_documento = %s")
+            params.append(tipo_documento)
+        if prazos_legais is not _NAO_INFORMADO and prazos_legais is not None:
+            set_clauses.append("prazos_legais = %s")
+            params.append(list(prazos_legais))
 
         params.append(id_atestado)
         sql = f"""
@@ -714,6 +1028,25 @@ class RepositorioA1Postgres:
             row = cur.fetchone()
             if row is None:
                 raise ValueError(f"Atestado {id_atestado} não encontrado para confirmação.")
+
+            if codigo_cid is not _NAO_INFORMADO and politica_cid_restrito:
+                if codigo_cid is not None:
+                    cur.execute(
+                        """
+                        INSERT INTO afastamento.cid_restrito (id_atestado, codigo_cid)
+                        VALUES (%s, %s)
+                        ON CONFLICT (id_atestado)
+                        DO UPDATE SET codigo_cid = EXCLUDED.codigo_cid,
+                                      registrado_em = now()
+                        """,
+                        (id_atestado, codigo_cid),
+                    )
+                else:
+                    cur.execute(
+                        "DELETE FROM afastamento.cid_restrito WHERE id_atestado = %s",
+                        (id_atestado,),
+                    )
+
             conn.commit()
             return RegistroAtestadoDB(**row)
 
@@ -722,9 +1055,14 @@ class RepositorioA1Postgres:
         id_atestado: int,
         recebido_fisico_por: int | str,
         recebido_fisico_em: datetime | str,
+        *,
+        perfis_permitidos: Collection[str] | None = ("RH", "ADMIN"),
     ) -> RegistroAtestadoDB:
-        id_usuario_rh = self.resolver_id_usuario(recebido_fisico_por)
+        id_usuario_rh = self.resolver_id_usuario(
+            recebido_fisico_por, perfis_permitidos=perfis_permitidos
+        )
         dt_recebimento = _parse_datetime_iso(recebido_fisico_em)
+        recebido_por_texto = str(recebido_fisico_por).strip() or str(id_usuario_rh)
 
         sql = """
             UPDATE afastamento.atestado
@@ -741,8 +1079,178 @@ class RepositorioA1Postgres:
                 raise ValueError(
                     f"Atestado {id_atestado} não encontrado ou ainda não confirmado."
                 )
+            cur.execute(
+                """
+                INSERT INTO afastamento.baixa_fisica (
+                    id_atestado, id_usuario_rh, recebido_por, data_hora
+                )
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (id_atestado)
+                DO UPDATE SET id_usuario_rh = EXCLUDED.id_usuario_rh,
+                              recebido_por = EXCLUDED.recebido_por,
+                              data_hora = EXCLUDED.data_hora,
+                              registrado_em = now()
+                """,
+                (id_atestado, id_usuario_rh, recebido_por_texto, dt_recebimento),
+            )
             conn.commit()
             return RegistroAtestadoDB(**row)
+
+    def registrar_arquivo_atestado(
+        self,
+        id_atestado: int,
+        *,
+        id_colaborador: int,
+        arquivo_uri: str,
+        sha256: str,
+        mime: str | None = None,
+        id_caso: int | None = None,
+    ) -> RegistroArquivoAtestadoDB:
+        sha_norm = sha256.strip().lower()
+        uri_limpa = arquivo_uri.strip()
+        sql = """
+            INSERT INTO afastamento.atestado_arquivo (
+                id_atestado, id_caso, id_colaborador, arquivo_uri, mime, sha256
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING *
+        """
+        with self._conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                sql, (id_atestado, id_caso, id_colaborador, uri_limpa, mime, sha_norm)
+            )
+            row = cur.fetchone()
+            conn.commit()
+            self._sha256_por_chave[(id_colaborador, sha_norm)] = id_atestado
+            self._sha256_global[sha_norm] = id_atestado
+            return RegistroArquivoAtestadoDB(**row)
+
+    def listar_arquivos_atestado(
+        self, id_atestado: int
+    ) -> list[RegistroArquivoAtestadoDB]:
+        sql = """
+            SELECT *
+            FROM afastamento.atestado_arquivo
+            WHERE id_atestado = %s
+            ORDER BY enviado_em ASC, id_arquivo ASC
+        """
+        with self._conectar() as conn, conn.cursor() as cur:
+            cur.execute(sql, (id_atestado,))
+            return [RegistroArquivoAtestadoDB(**row) for row in cur.fetchall()]
+
+    def salvar_campos_atestado(
+        self,
+        id_atestado: int,
+        campos: Sequence[dict[str, Any]],
+        *,
+        id_caso: int | None = None,
+    ) -> list[RegistroCampoAtestadoDB]:
+        if not campos:
+            return []
+        sql = """
+            INSERT INTO afastamento.atestado_campo (
+                id_atestado,
+                id_caso,
+                nome_campo,
+                valor_extraido,
+                valor_confirmado,
+                confianca,
+                origem,
+                vazio_por_baixa_confianca
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id_atestado, nome_campo)
+            DO UPDATE SET
+                id_caso = COALESCE(EXCLUDED.id_caso, afastamento.atestado_campo.id_caso),
+                valor_extraido = COALESCE(
+                    EXCLUDED.valor_extraido, afastamento.atestado_campo.valor_extraido
+                ),
+                valor_confirmado = COALESCE(
+                    EXCLUDED.valor_confirmado, afastamento.atestado_campo.valor_confirmado
+                ),
+                confianca = COALESCE(
+                    EXCLUDED.confianca, afastamento.atestado_campo.confianca
+                ),
+                origem = EXCLUDED.origem,
+                vazio_por_baixa_confianca = EXCLUDED.vazio_por_baixa_confianca,
+                atualizado_em = now()
+            RETURNING *
+        """
+        salvos: list[RegistroCampoAtestadoDB] = []
+        with self._conectar() as conn, conn.cursor() as cur:
+            for item in campos:
+                cur.execute(
+                    sql,
+                    (
+                        id_atestado,
+                        item.get("id_caso", id_caso),
+                        str(item["nome_campo"]),
+                        item.get("valor_extraido"),
+                        item.get("valor_confirmado"),
+                        item.get("confianca"),
+                        item.get("origem", "IA"),
+                        bool(item.get("vazio_por_baixa_confianca", False)),
+                    ),
+                )
+                row = cur.fetchone()
+                if row is not None:
+                    salvos.append(RegistroCampoAtestadoDB(**row))
+            conn.commit()
+        return salvos
+
+    def listar_campos_atestado(
+        self, id_atestado: int
+    ) -> list[RegistroCampoAtestadoDB]:
+        sql = """
+            SELECT *
+            FROM afastamento.atestado_campo
+            WHERE id_atestado = %s
+            ORDER BY id_campo ASC
+        """
+        with self._conectar() as conn, conn.cursor() as cur:
+            cur.execute(sql, (id_atestado,))
+            return [RegistroCampoAtestadoDB(**row) for row in cur.fetchall()]
+
+    def obter_baixa_fisica(self, id_atestado: int) -> RegistroBaixaFisicaDB | None:
+        sql = "SELECT * FROM afastamento.baixa_fisica WHERE id_atestado = %s LIMIT 1"
+        with self._conectar() as conn, conn.cursor() as cur:
+            cur.execute(sql, (id_atestado,))
+            row = cur.fetchone()
+            return RegistroBaixaFisicaDB(**row) if row is not None else None
+
+    def salvar_cid_restrito(
+        self, id_atestado: int, codigo_cid: str | None
+    ) -> RegistroCidRestritoDB | None:
+        with self._conectar() as conn, conn.cursor() as cur:
+            if codigo_cid is None or not str(codigo_cid).strip():
+                cur.execute(
+                    "DELETE FROM afastamento.cid_restrito WHERE id_atestado = %s",
+                    (id_atestado,),
+                )
+                conn.commit()
+                return None
+            cid_norm = str(codigo_cid).strip().upper()
+            cur.execute(
+                """
+                INSERT INTO afastamento.cid_restrito (id_atestado, codigo_cid)
+                VALUES (%s, %s)
+                ON CONFLICT (id_atestado)
+                DO UPDATE SET codigo_cid = EXCLUDED.codigo_cid,
+                              registrado_em = now()
+                RETURNING *
+                """,
+                (id_atestado, cid_norm),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return RegistroCidRestritoDB(**row) if row is not None else None
+
+    def obter_cid_restrito(self, id_atestado: int) -> RegistroCidRestritoDB | None:
+        sql = "SELECT * FROM afastamento.cid_restrito WHERE id_atestado = %s LIMIT 1"
+        with self._conectar() as conn, conn.cursor() as cur:
+            cur.execute(sql, (id_atestado,))
+            row = cur.fetchone()
+            return RegistroCidRestritoDB(**row) if row is not None else None
 
 
 class RepositorioA1Memoria:
@@ -764,8 +1272,17 @@ class RepositorioA1Memoria:
         self.profissionais: dict[int, dict[str, Any]] = {}
         self._chave_profissional: dict[tuple[int, str, str], int] = {}
         self.atestados: dict[int, RegistroAtestadoDB] = {}
+        self.arquivos_atestado: dict[int, RegistroArquivoAtestadoDB] = {}
+        self.campos_atestado: dict[tuple[int, str], RegistroCampoAtestadoDB] = {}
+        self.baixas_fisicas: dict[int, RegistroBaixaFisicaDB] = {}
+        self.cids_restritos: dict[int, RegistroCidRestritoDB] = {}
+        self._sha256_por_chave: dict[tuple[int, str], int] = {}
+        self._sha256_global: dict[str, int] = {}
         self._seq_profissional = 1
         self._seq_atestado = 311
+        self._seq_arquivo = 1
+        self._seq_campo = 1
+        self._seq_baixa = 1
 
         if popular_padrao:
             self._popular_dados_canonicos()
@@ -865,6 +1382,32 @@ class RepositorioA1Memoria:
             return None
         return self.conselhos.get(sigla_norm)
 
+    def listar_conselhos_validos(self, uf: str) -> tuple[str, ...]:
+        uf_norm = uf.strip().upper()
+        if uf_norm not in self.ufs:
+            return ()
+        return tuple(sorted(self.conselhos.keys()))
+
+    def obter_profissional(self, id_profissional: int) -> dict[str, Any] | None:
+        prof = self.profissionais.get(id_profissional)
+        if prof is None:
+            return None
+        sigla_conselho = next(
+            (sig for sig, cid in self.conselhos.items() if cid == prof["id_conselho"]),
+            None,
+        )
+        if sigla_conselho is None:
+            return None
+        return {
+            "conselho": sigla_conselho,
+            "numero": prof["numero_registro"],
+            "uf": prof["sigla_uf"],
+            "nome": prof.get("nome"),
+        }
+
+    def obter_municipio(self, id_municipio: int) -> tuple[str, str] | None:
+        return self.municipios.get(id_municipio)
+
     def validar_cid(
         self, codigo_cid: str | None, *, politica_extrair_cid: bool = True
     ) -> str | None:
@@ -873,10 +1416,30 @@ class RepositorioA1Memoria:
         codigo_norm = codigo_cid.strip().upper()
         return codigo_norm if codigo_norm in self.cids else None
 
-    def resolver_id_usuario(self, identificador: int | str) -> int:
+    def _validar_perfil_usuario(
+        self,
+        user: dict[str, Any],
+        identificador: int | str,
+        perfis_permitidos: Collection[str] | None,
+    ) -> None:
+        if perfis_permitidos is None:
+            return
+        permitidos = {p.strip().upper() for p in perfis_permitidos if p.strip()}
+        if str(user["perfil"]).strip().upper() not in permitidos:
+            raise PermissionError(
+                f"Usuário {identificador!r} (perfil={user['perfil']}) não autorizado para esta operação."
+            )
+
+    def resolver_id_usuario(
+        self,
+        identificador: int | str,
+        *,
+        perfis_permitidos: Collection[str] | None = None,
+    ) -> int:
         if isinstance(identificador, int) and not isinstance(identificador, bool):
             user = self.usuarios_por_id.get(identificador)
             if user and user["ativo"]:
+                self._validar_perfil_usuario(user, identificador, perfis_permitidos)
                 return int(user["id_usuario"])
             raise ValueError(f"Usuário não encontrado ou inativo: {identificador!r}")
 
@@ -887,12 +1450,14 @@ class RepositorioA1Memoria:
         if texto.isdigit():
             user = self.usuarios_por_id.get(int(texto))
             if user and user["ativo"]:
+                self._validar_perfil_usuario(user, identificador, perfis_permitidos)
                 return int(user["id_usuario"])
 
         uid = self.usuarios_por_login.get(texto.lower())
         if uid is not None:
             user = self.usuarios_por_id.get(uid)
             if user and user["ativo"]:
+                self._validar_perfil_usuario(user, identificador, perfis_permitidos)
                 return uid
 
         raise ValueError(f"Usuário não encontrado ou inativo: {identificador!r}")
@@ -939,7 +1504,35 @@ class RepositorioA1Memoria:
         self,
         arquivo_uri: str,
         id_colaborador: int | None = None,
+        *,
+        sha256: str | None = None,
     ) -> RegistroAtestadoDB | None:
+        if sha256 and sha256.strip():
+            sha_norm = sha256.strip().lower()
+            arquivos_match = [
+                arq
+                for arq in self.arquivos_atestado.values()
+                if arq.sha256 == sha_norm
+                and (id_colaborador is None or arq.id_colaborador == id_colaborador)
+            ]
+            arquivos_match.sort(
+                key=lambda arq: (arq.enviado_em, arq.id_arquivo), reverse=True
+            )
+            for arq in arquivos_match:
+                reg = self.atestados.get(arq.id_atestado)
+                if reg is not None and reg.status != "REJEITADO":
+                    return reg.model_copy(deep=True)
+
+            id_at = (
+                self._sha256_por_chave.get((id_colaborador, sha_norm))
+                if id_colaborador is not None
+                else self._sha256_global.get(sha_norm)
+            )
+            if id_at is not None:
+                reg = self.atestados.get(id_at)
+                if reg is not None and reg.status != "REJEITADO":
+                    return reg.model_copy(deep=True)
+
         uri_limpa = arquivo_uri.strip()
         if not uri_limpa:
             return None
@@ -980,9 +1573,17 @@ class RepositorioA1Memoria:
         data_referencia: date,
         cid: str | None = None,
     ) -> int:
-        do_colaborador = [
-            at for at in self.atestados.values() if at.id_colaborador == id_colaborador
-        ]
+        do_colaborador: list[RegistroAtestadoDB] = []
+        for at in self.atestados.values():
+            if at.id_colaborador != id_colaborador:
+                continue
+            cid_restrito = self.cids_restritos.get(at.id_atestado)
+            if cid_restrito is not None and at.codigo_cid is None:
+                do_colaborador.append(
+                    at.model_copy(update={"codigo_cid": cid_restrito.codigo_cid})
+                )
+            else:
+                do_colaborador.append(at)
         return _somar_dias_janela_60d(do_colaborador, data_referencia, cid)
 
     def salvar_atestado_pendente(
@@ -997,6 +1598,11 @@ class RepositorioA1Memoria:
         arquivo_uri: str,
         codigo_cid: str | None = None,
         origem_dados: OrigemDadosAtestado = "IA",
+        arquivo_sha256: str | None = None,
+        id_caso: int | None = None,
+        tipo_documento: TipoDocumentoAfastamento = "atestado_medico",
+        arquivo_mime: str | None = None,
+        politica_cid_restrito: bool = True,
     ) -> RegistroAtestadoDB:
         if id_colaborador not in self.colaboradores:
             raise ValueError(f"Colaborador {id_colaborador} inexistente.")
@@ -1018,12 +1624,15 @@ class RepositorioA1Memoria:
 
         id_atestado = self._seq_atestado
         self._seq_atestado += 1
+        cid_norm = codigo_cid.upper() if codigo_cid else None
         registro = RegistroAtestadoDB(
             id_atestado=id_atestado,
+            id_caso=id_caso,
             id_colaborador=id_colaborador,
             id_profissional=id_profissional,
-            codigo_cid=codigo_cid.upper() if codigo_cid else None,
+            codigo_cid=None if politica_cid_restrito else cid_norm,
             id_municipio=id_municipio,
+            tipo_documento=tipo_documento,
             data_emissao=data_emissao,
             inicio_afastamento=dt_inicio,
             fim_afastamento=dt_fim,
@@ -1033,6 +1642,17 @@ class RepositorioA1Memoria:
             postado_em=datetime.now(UTC),
         )
         self.atestados[id_atestado] = registro
+        if politica_cid_restrito and cid_norm is not None:
+            self.salvar_cid_restrito(id_atestado, cid_norm)
+        if arquivo_sha256 and arquivo_sha256.strip():
+            self.registrar_arquivo_atestado(
+                id_atestado,
+                id_colaborador=id_colaborador,
+                arquivo_uri=uri_limpa,
+                sha256=arquivo_sha256,
+                mime=arquivo_mime,
+                id_caso=id_caso,
+            )
         return registro.model_copy(deep=True)
 
     def obter_atestado(self, id_atestado: int) -> RegistroAtestadoDB | None:
@@ -1064,6 +1684,9 @@ class RepositorioA1Memoria:
         id_profissional: int | None = _NAO_INFORMADO,
         codigo_cid: str | None = _NAO_INFORMADO,
         id_municipio: int | None = _NAO_INFORMADO,
+        tipo_documento: TipoDocumentoAfastamento | None = _NAO_INFORMADO,
+        prazos_legais: Sequence[str] | None = _NAO_INFORMADO,
+        politica_cid_restrito: bool = True,
     ) -> RegistroAtestadoDB:
         atual = self.atestados.get(id_atestado)
         if atual is None:
@@ -1089,11 +1712,20 @@ class RepositorioA1Memoria:
         if codigo_cid is not _NAO_INFORMADO:
             if codigo_cid is not None and codigo_cid.upper() not in self.cids:
                 raise ValueError(f"CID {codigo_cid!r} inexistente no catálogo.")
-            updates["codigo_cid"] = codigo_cid.upper() if codigo_cid else None
+            cid_norm = codigo_cid.upper() if codigo_cid else None
+            if politica_cid_restrito:
+                updates["codigo_cid"] = None
+                self.salvar_cid_restrito(id_atestado, cid_norm)
+            else:
+                updates["codigo_cid"] = cid_norm
         if id_municipio is not _NAO_INFORMADO and id_municipio is not None:
             if id_municipio not in self.municipios:
                 raise ValueError(f"Município {id_municipio} inexistente.")
             updates["id_municipio"] = id_municipio
+        if tipo_documento is not _NAO_INFORMADO and tipo_documento is not None:
+            updates["tipo_documento"] = tipo_documento
+        if prazos_legais is not _NAO_INFORMADO and prazos_legais is not None:
+            updates["prazos_legais"] = list(prazos_legais)
 
         atualizado = atual.model_copy(update=updates)
         self.atestados[id_atestado] = atualizado
@@ -1104,6 +1736,8 @@ class RepositorioA1Memoria:
         id_atestado: int,
         recebido_fisico_por: int | str,
         recebido_fisico_em: datetime | str,
+        *,
+        perfis_permitidos: Collection[str] | None = ("RH", "ADMIN"),
     ) -> RegistroAtestadoDB:
         atual = self.atestados.get(id_atestado)
         if atual is None or atual.status != "CONFIRMADO":
@@ -1111,7 +1745,9 @@ class RepositorioA1Memoria:
                 f"Atestado {id_atestado} não encontrado ou ainda não confirmado."
             )
 
-        id_usuario_rh = self.resolver_id_usuario(recebido_fisico_por)
+        id_usuario_rh = self.resolver_id_usuario(
+            recebido_fisico_por, perfis_permitidos=perfis_permitidos
+        )
         dt_recebimento = _parse_datetime_iso(recebido_fisico_em)
         atualizado = atual.model_copy(
             update={
@@ -1120,4 +1756,153 @@ class RepositorioA1Memoria:
             }
         )
         self.atestados[id_atestado] = atualizado
+
+        recebido_por_texto = str(recebido_fisico_por).strip() or str(id_usuario_rh)
+        existente = self.baixas_fisicas.get(id_atestado)
+        id_baixa = existente.id_baixa if existente is not None else self._seq_baixa
+        if existente is None:
+            self._seq_baixa += 1
+        self.baixas_fisicas[id_atestado] = RegistroBaixaFisicaDB(
+            id_baixa=id_baixa,
+            id_atestado=id_atestado,
+            id_usuario_rh=id_usuario_rh,
+            recebido_por=recebido_por_texto,
+            data_hora=dt_recebimento,
+            registrado_em=datetime.now(UTC),
+        )
         return atualizado.model_copy(deep=True)
+
+    def registrar_arquivo_atestado(
+        self,
+        id_atestado: int,
+        *,
+        id_colaborador: int,
+        arquivo_uri: str,
+        sha256: str,
+        mime: str | None = None,
+        id_caso: int | None = None,
+    ) -> RegistroArquivoAtestadoDB:
+        sha_norm = sha256.strip().lower()
+        id_arquivo = self._seq_arquivo
+        self._seq_arquivo += 1
+        registro = RegistroArquivoAtestadoDB(
+            id_arquivo=id_arquivo,
+            id_atestado=id_atestado,
+            id_caso=id_caso,
+            id_colaborador=id_colaborador,
+            arquivo_uri=arquivo_uri.strip(),
+            mime=mime,
+            sha256=sha_norm,
+            enviado_em=datetime.now(UTC),
+        )
+        self.arquivos_atestado[id_arquivo] = registro
+        self._sha256_por_chave[(id_colaborador, sha_norm)] = id_atestado
+        self._sha256_global[sha_norm] = id_atestado
+        return registro.model_copy(deep=True)
+
+    def listar_arquivos_atestado(
+        self, id_atestado: int
+    ) -> list[RegistroArquivoAtestadoDB]:
+        itens = [
+            arq.model_copy(deep=True)
+            for arq in self.arquivos_atestado.values()
+            if arq.id_atestado == id_atestado
+        ]
+        itens.sort(key=lambda arq: (arq.enviado_em, arq.id_arquivo))
+        return itens
+
+    def salvar_campos_atestado(
+        self,
+        id_atestado: int,
+        campos: Sequence[dict[str, Any]],
+        *,
+        id_caso: int | None = None,
+    ) -> list[RegistroCampoAtestadoDB]:
+        salvos: list[RegistroCampoAtestadoDB] = []
+        agora = datetime.now(UTC)
+        for item in campos:
+            nome_campo = str(item["nome_campo"])
+            chave = (id_atestado, nome_campo)
+            existente = self.campos_atestado.get(chave)
+            if existente is not None:
+                registro = existente.model_copy(
+                    update={
+                        "id_caso": item.get("id_caso", id_caso) or existente.id_caso,
+                        "valor_extraido": (
+                            item["valor_extraido"]
+                            if item.get("valor_extraido") is not None
+                            else existente.valor_extraido
+                        ),
+                        "valor_confirmado": (
+                            item["valor_confirmado"]
+                            if item.get("valor_confirmado") is not None
+                            else existente.valor_confirmado
+                        ),
+                        "confianca": (
+                            item["confianca"]
+                            if item.get("confianca") is not None
+                            else existente.confianca
+                        ),
+                        "origem": item.get("origem", "IA"),
+                        "vazio_por_baixa_confianca": bool(
+                            item.get("vazio_por_baixa_confianca", False)
+                        ),
+                        "atualizado_em": agora,
+                    }
+                )
+            else:
+                id_campo = self._seq_campo
+                self._seq_campo += 1
+                registro = RegistroCampoAtestadoDB(
+                    id_campo=id_campo,
+                    id_atestado=id_atestado,
+                    id_caso=item.get("id_caso", id_caso),
+                    nome_campo=nome_campo,
+                    valor_extraido=item.get("valor_extraido"),
+                    valor_confirmado=item.get("valor_confirmado"),
+                    confianca=item.get("confianca"),
+                    origem=item.get("origem", "IA"),
+                    vazio_por_baixa_confianca=bool(
+                        item.get("vazio_por_baixa_confianca", False)
+                    ),
+                    atualizado_em=agora,
+                )
+            self.campos_atestado[chave] = registro
+            salvos.append(registro.model_copy(deep=True))
+        return salvos
+
+    def listar_campos_atestado(
+        self, id_atestado: int
+    ) -> list[RegistroCampoAtestadoDB]:
+        itens = [
+            campo.model_copy(deep=True)
+            for campo in self.campos_atestado.values()
+            if campo.id_atestado == id_atestado
+        ]
+        itens.sort(key=lambda c: c.id_campo)
+        return itens
+
+    def obter_baixa_fisica(self, id_atestado: int) -> RegistroBaixaFisicaDB | None:
+        reg = self.baixas_fisicas.get(id_atestado)
+        return reg.model_copy(deep=True) if reg is not None else None
+
+    def salvar_cid_restrito(
+        self, id_atestado: int, codigo_cid: str | None
+    ) -> RegistroCidRestritoDB | None:
+        if codigo_cid is None or not str(codigo_cid).strip():
+            self.cids_restritos.pop(id_atestado, None)
+            return None
+        cid_norm = str(codigo_cid).strip().upper()
+        if cid_norm not in self.cids:
+            raise ValueError(f"CID {codigo_cid!r} inexistente no catálogo.")
+        registro = RegistroCidRestritoDB(
+            id_atestado=id_atestado,
+            codigo_cid=cid_norm,
+            registrado_em=datetime.now(UTC),
+        )
+        self.cids_restritos[id_atestado] = registro
+        return registro.model_copy(deep=True)
+
+    def obter_cid_restrito(self, id_atestado: int) -> RegistroCidRestritoDB | None:
+        reg = self.cids_restritos.get(id_atestado)
+        return reg.model_copy(deep=True) if reg is not None else None

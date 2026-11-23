@@ -15,11 +15,13 @@
   "estado_proposto": "RECEBIDO",
   "payload": {
     "atestado_extraido": {
+      "tipo_documento": "atestado_medico",
       "legibilidade": "ok",
       "nome_no_documento": "Carla Souza",
       "periodo": {
         "inicio": "2026-11-09",
-        "fim": "2026-11-11"
+        "fim": "2026-11-11",
+        "dias": 3
       },
       "data_emissao": "2026-11-09",
       "profissional": {
@@ -28,7 +30,8 @@
         "uf": "SP"
       },
       "cid": null,
-      "municipio": "Campinas"
+      "municipio": "Campinas",
+      "campos": {}
     },
     "divergencias": [
       {

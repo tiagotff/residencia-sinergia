@@ -293,7 +293,11 @@ def _montar_registro_inicial(
         "jornada_fim": "16:00",
         "municipio": "Campinas",
         "uf": "SP",
-        "tipo_solicitacao": "atestado_medico",
+        "tipo_solicitacao": (
+            "declaracao_comparecimento"
+            if amostra.cenario == "declaracao_comparecimento"
+            else "atestado_medico"
+        ),
         "inicio_informado": inicio_str,
         "dias_informados": dias_esp,
         "tem_documento": True,
@@ -1081,8 +1085,10 @@ def gerar_relatorio_markdown_task_32(relatorio: dict[str, Any]) -> str:
             "",
             "## Amostras Legíveis Avaliadas",
             "",
-            "| Amostra | Formato | Conselho/UF | CID | Origem | Prazo Físico | "
-            "Extração Exata | Baixa no Prazo |",
+            (
+                "| Amostra | Formato | Conselho/UF | CID | Origem | Prazo Físico | "
+                "Extração Exata | Baixa no Prazo |"
+            ),
             "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
         ]
     )
@@ -1101,8 +1107,10 @@ def gerar_relatorio_markdown_task_32(relatorio: dict[str, Any]) -> str:
             "",
             "## Amostras Ilegíveis Avaliadas (Guardrail)",
             "",
-            "| Amostra | Formato | Modo | Legibilidade | Estado Proposto | "
-            "Usou LLM | Registros DB | Rejeição Segura |",
+            (
+                "| Amostra | Formato | Modo | Legibilidade | Estado Proposto | "
+                "Usou LLM | Registros DB | Rejeição Segura |"
+            ),
             "| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: |",
         ]
     )

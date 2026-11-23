@@ -25,6 +25,7 @@ dependencies = [
     "pymupdf>=1.24.3",
     "rapidocr-onnxruntime",
     "python-dotenv",
+    "jsonschema",
     "pgvector",
     "streamlit",
     "httpx",

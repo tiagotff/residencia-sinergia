@@ -10,11 +10,13 @@
       "sha256_png": "b5e6b4363c1e2377824c6af62171176c4f0b78b88f789f4425cbf8b7620ed47f",
       "sha256_pdf": "2395ad8e6e501c172a849895a681f2bcc8eafd3555755569a94aba556847b568",
       "esperado": {
+        "tipo_documento": "atestado_medico",
         "legibilidade": "ok",
         "nome_no_documento": "Carla Souza",
         "periodo": {
           "inicio": "2026-11-09",
-          "fim": "2026-11-11"
+          "fim": "2026-11-11",
+          "dias": 3
         },
         "data_emissao": "2026-11-09",
         "profissional": {
@@ -24,7 +26,8 @@
           "nome": null
         },
         "cid": "J06.9",
-        "municipio": "Campinas"
+        "municipio": "Campinas",
+        "campos": {}
       },
       "cenario": "canonico_anexo_d2",
       "campos_corrigidos_sugeridos": []
@@ -37,11 +40,13 @@
       "sha256_png": "18ba65e5fd90b4b4c9dd57737992e7ce04f10d116140e0553a6fe3df6aa28246",
       "sha256_pdf": "95f8656397bd968dbd191c41dc5cbe8d91e6b5b5d3bcfd298f0ce547fe6b69bf",
       "esperado": {
+        "tipo_documento": "atestado_medico",
         "legibilidade": "ok",
         "nome_no_documento": "Carla Souza",
         "periodo": {
           "inicio": "2026-11-16",
-          "fim": "2026-11-20"
+          "fim": "2026-11-20",
+          "dias": 5
         },
         "data_emissao": "2026-11-16",
         "profissional": {
@@ -51,7 +56,8 @@
           "nome": null
         },
         "cid": "M54.5",
-        "municipio": "Campinas"
+        "municipio": "Campinas",
+        "campos": {}
       },
       "cenario": "afastamento_lombar_com_cid",
       "campos_corrigidos_sugeridos": []
@@ -64,11 +70,13 @@
       "sha256_png": "937495bb8889f65dc5e24b60c25ab3d2e133bca1223fb25ec657f0e768d1c1aa",
       "sha256_pdf": "97c081a42bf5d3c1c4c7d688479687258148b8983738a4ecb52880037ada18d7",
       "esperado": {
+        "tipo_documento": "atestado_medico",
         "legibilidade": "ok",
         "nome_no_documento": "Carla Souza",
         "periodo": {
           "inicio": "2026-11-23",
-          "fim": "2026-11-24"
+          "fim": "2026-11-24",
+          "dias": 2
         },
         "data_emissao": "2026-11-23",
         "profissional": {
@@ -78,7 +86,8 @@
           "nome": null
         },
         "cid": null,
-        "municipio": "Campinas"
+        "municipio": "Campinas",
+        "campos": {}
       },
       "cenario": "sem_cid_sigilo_medico",
       "campos_corrigidos_sugeridos": []
@@ -91,11 +100,13 @@
       "sha256_png": "892b8311a2f6dbf3154caf179637b4509be297c784c45d79497f4750ffcf4686",
       "sha256_pdf": "a3b43a1487a940ba15801a74ee2e0a78f5a2c42b24b6c01b5b768e76b9610066",
       "esperado": {
+        "tipo_documento": "atestado_medico",
         "legibilidade": "ok",
         "nome_no_documento": "Carla Souza",
         "periodo": {
           "inicio": "2026-11-25",
-          "fim": "2026-11-25"
+          "fim": "2026-11-25",
+          "dias": 1
         },
         "data_emissao": "2026-11-25",
         "profissional": {
@@ -105,7 +116,8 @@
           "nome": null
         },
         "cid": "Z00.0",
-        "municipio": "São Paulo"
+        "municipio": "São Paulo",
+        "campos": {}
       },
       "cenario": "odontologico_cro",
       "campos_corrigidos_sugeridos": []
@@ -118,11 +130,13 @@
       "sha256_png": "cf8f0972841292b8012afc0ca24204c2ee129c0a79ca871dedcf5418cbf36a7b",
       "sha256_pdf": "33e066f4a8902d7471d65b452f8f28e5e3041aa1db5f07121e8abf0ab60f88e4",
       "esperado": {
+        "tipo_documento": "atestado_medico",
         "legibilidade": "ok",
         "nome_no_documento": "Carla Souza",
         "periodo": {
           "inicio": "2026-12-01",
-          "fim": "2026-12-07"
+          "fim": "2026-12-07",
+          "dias": 7
         },
         "data_emissao": "2026-12-01",
         "profissional": {
@@ -132,7 +146,8 @@
           "nome": null
         },
         "cid": "F41.1",
-        "municipio": "Campinas"
+        "municipio": "Campinas",
+        "campos": {}
       },
       "cenario": "psicologico_crp",
       "campos_corrigidos_sugeridos": []
@@ -145,11 +160,13 @@
       "sha256_png": "9a7c550ba8f347693d1158f313b3e726fa2a097acd0b91f9f1c3858a137fac7c",
       "sha256_pdf": "58787f7b293dbbbe5cf6c3c930a6eccfa73b6ca48a710ce7756cbc42a83bd0c9",
       "esperado": {
+        "tipo_documento": "atestado_medico",
         "legibilidade": "ok",
         "nome_no_documento": "Carla Souza",
         "periodo": {
           "inicio": "2026-12-10",
-          "fim": "2026-12-10"
+          "fim": "2026-12-10",
+          "dias": 1
         },
         "data_emissao": "2026-12-10",
         "profissional": {
@@ -159,7 +176,8 @@
           "nome": null
         },
         "cid": "Z00.0",
-        "municipio": "São Paulo"
+        "municipio": "São Paulo",
+        "campos": {}
       },
       "cenario": "declaracao_comparecimento",
       "campos_corrigidos_sugeridos": []
@@ -172,11 +190,13 @@
       "sha256_png": "79fe2aae3ff5a90725719cb11cf39ce4d01797cfdd0e9527ba9624239874a561",
       "sha256_pdf": "e6d9634d88cac45e59b08484b8f085ded27a71f00a5c17cdc124941fa736c8b2",
       "esperado": {
+        "tipo_documento": "atestado_medico",
         "legibilidade": "ok",
         "nome_no_documento": "Carla Souza",
         "periodo": {
           "inicio": "2026-12-14",
-          "fim": "2026-12-17"
+          "fim": "2026-12-17",
+          "dias": 4
         },
         "data_emissao": "2026-12-14",
         "profissional": {
@@ -186,7 +206,8 @@
           "nome": null
         },
         "cid": null,
-        "municipio": "Campinas"
+        "municipio": "Campinas",
+        "campos": {}
       },
       "cenario": "ruido_leve_revisao_manual",
       "campos_corrigidos_sugeridos": [
@@ -201,11 +222,13 @@
       "sha256_png": "68918ac774d43819169f94a614c6131d604e61d322ad5aafad60788dde188e4b",
       "sha256_pdf": "b9227f5cb3eb5751b361eef4089f1cebc0e932e0a8aceb2398bcc66310ad8c3e",
       "esperado": {
+        "tipo_documento": "atestado_medico",
         "legibilidade": "ok",
         "nome_no_documento": "Carla Souza",
         "periodo": {
           "inicio": "2026-11-01",
-          "fim": "2026-11-30"
+          "fim": "2026-11-30",
+          "dias": 30
         },
         "data_emissao": "2026-11-01",
         "profissional": {
@@ -215,7 +238,8 @@
           "nome": null
         },
         "cid": "M54.5",
-        "municipio": "Campinas"
+        "municipio": "Campinas",
+        "campos": {}
       },
       "cenario": "afastamento_longo_inss_nr7",
       "campos_corrigidos_sugeridos": []
@@ -228,11 +252,13 @@
       "sha256_png": "cde75ba43136a06b194c0bc849bef2db9cfe908d218066467dd357ca18e6ebeb",
       "sha256_pdf": "c02138ef5e97327172ac2fb3db9c1676601ff48782fa86a13ed134e6803365bf",
       "esperado": {
+        "tipo_documento": "atestado_medico",
         "legibilidade": "ilegivel",
         "nome_no_documento": null,
         "periodo": {
           "inicio": null,
-          "fim": null
+          "fim": null,
+          "dias": null
         },
         "data_emissao": null,
         "profissional": {
@@ -242,7 +268,8 @@
           "nome": null
         },
         "cid": null,
-        "municipio": null
+        "municipio": null,
+        "campos": {}
       },
       "cenario": "ilegivel_borrado",
       "campos_corrigidos_sugeridos": []
@@ -255,11 +282,13 @@
       "sha256_png": "5649bd9fb8c8a3778355d876e8e9b6738fddadfd742f2ddb376c08a4df710ab3",
       "sha256_pdf": "c05237abadfc5b86747e2afed51f81953228f554cc7deb2a9bf109821f349c54",
       "esperado": {
+        "tipo_documento": "atestado_medico",
         "legibilidade": "ilegivel",
         "nome_no_documento": null,
         "periodo": {
           "inicio": null,
-          "fim": null
+          "fim": null,
+          "dias": null
         },
         "data_emissao": null,
         "profissional": {
@@ -269,7 +298,8 @@
           "nome": null
         },
         "cid": null,
-        "municipio": null
+        "municipio": null,
+        "campos": {}
       },
       "cenario": "ilegivel_subexposto",
       "campos_corrigidos_sugeridos": []
@@ -282,11 +312,13 @@
       "sha256_png": "47bae1524dbcd91306f81e7dff55df11ece4a86bbcfff1e5e1dae75ee091dae2",
       "sha256_pdf": "d63364e9e820bba547f1f55d5cfd3e3ef5c9e2790c56f65f9c96efa9d1b8d80c",
       "esperado": {
+        "tipo_documento": "atestado_medico",
         "legibilidade": "ilegivel",
         "nome_no_documento": null,
         "periodo": {
           "inicio": null,
-          "fim": null
+          "fim": null,
+          "dias": null
         },
         "data_emissao": null,
         "profissional": {
@@ -296,7 +328,8 @@
           "nome": null
         },
         "cid": null,
-        "municipio": null
+        "municipio": null,
+        "campos": {}
       },
       "cenario": "ilegivel_cortado",
       "campos_corrigidos_sugeridos": []
@@ -309,11 +342,13 @@
       "sha256_png": "aa5f839e6cf6ca8a12bbba086b8b2032e16b04682ebf8d8d11095df01e21861a",
       "sha256_pdf": "7e78ce007fb72069050fb144fe30822974b981efd9684ef65f9bd42cfdd4596f",
       "esperado": {
+        "tipo_documento": "atestado_medico",
         "legibilidade": "ilegivel",
         "nome_no_documento": null,
         "periodo": {
           "inicio": null,
-          "fim": null
+          "fim": null,
+          "dias": null
         },
         "data_emissao": null,
         "profissional": {
@@ -323,7 +358,8 @@
           "nome": null
         },
         "cid": null,
-        "municipio": null
+        "municipio": null,
+        "campos": {}
       },
       "cenario": "ilegivel_rasurado",
       "campos_corrigidos_sugeridos": []

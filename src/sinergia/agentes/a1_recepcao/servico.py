@@ -13,6 +13,11 @@ E.2, F e G), roteando as 4 ações oficiais:
 from __future__ import annotations
 
 import copy
+import logging
+import re
+import threading
+from collections import OrderedDict
+from collections.abc import Sequence
 from datetime import datetime
 from functools import lru_cache
 from typing import Any
@@ -33,8 +38,10 @@ from sinergia.agentes.a1_recepcao.repositorio import (
 )
 from sinergia.agentes.a1_recepcao.schemas import (
     AtestadoExtraido,
+    CampoMetadado,
     DecisaoAgente,
     DestinatarioSaida,
+    DivergenciaCampo,
     ErroAgente,
     EventoEmitido,
     PayloadBaixaFisicaResultado,
@@ -47,6 +54,7 @@ from sinergia.agentes.a1_recepcao.schemas import (
     PayloadProcessarDocumentoResultado,
     PayloadProcessarDocumentoTarefa,
     PeriodoAfastamento,
+    ProfissionalExtraido,
     ResultadoA1,
     SaidaMensagem,
     TarefaA1,
@@ -58,8 +66,67 @@ from sinergia.agentes.a1_recepcao.validador import (
     validar_dados_confirmados,
 )
 
-_CACHE_IDEMPOTENCIA_MODULO: dict[str, dict[str, Any]] = {}
+_LOGGER = logging.getLogger(__name__)
+
+
+class _CacheIdempotenciaLimitado:
+    """Cache LRU thread-safe para idempotência por `id_mensagem`."""
+
+    def __init__(self, max_entries: int = 2048) -> None:
+        self._max_entries = max_entries
+        self._lock = threading.RLock()
+        self._dados: OrderedDict[str, dict[str, Any]] = OrderedDict()
+
+    def __contains__(self, key: object) -> bool:
+        with self._lock:
+            return key in self._dados
+
+    def __getitem__(self, key: str) -> dict[str, Any]:
+        with self._lock:
+            valor = self._dados[key]
+            self._dados.move_to_end(key)
+            return valor
+
+    def __setitem__(self, key: str, value: dict[str, Any]) -> None:
+        with self._lock:
+            if key in self._dados:
+                self._dados.move_to_end(key)
+            self._dados[key] = value
+            while len(self._dados) > self._max_entries:
+                self._dados.popitem(last=False)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._dados.clear()
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._dados)
+
+
+_CACHE_IDEMPOTENCIA_MODULO = _CacheIdempotenciaLimitado(max_entries=2048)
 _EXTRACOES_PENDENTES_MODULO: dict[tuple[str | int, int, int | None], AtestadoExtraido] = {}
+_LOCK_LOCKS_MSG = threading.Lock()
+_LOCKS_POR_MSG: dict[str, threading.RLock] = {}
+
+
+def _obter_lock_mensagem(id_mensagem: str) -> threading.RLock:
+    with _LOCK_LOCKS_MSG:
+        if len(_LOCKS_POR_MSG) > 4096:
+            _LOCKS_POR_MSG.clear()
+        lock = _LOCKS_POR_MSG.get(id_mensagem)
+        if lock is None:
+            lock = threading.RLock()
+            _LOCKS_POR_MSG[id_mensagem] = lock
+        return lock
+
+
+def _sanitizar_mensagem_erro(texto: str) -> str:
+    """Remove credenciais, tokens e excesso de detalhes de mensagens de erro."""
+    sanitizado = re.sub(r"://[^/\s:@]+:[^/\s@]+@", "://***:***@", texto)
+    sanitizado = re.sub(r"gsk_[A-Za-z0-9_-]+", "gsk_***", sanitizado)
+    sanitizado = re.sub(r"Bearer\s+\S+", "Bearer ***", sanitizado, flags=re.IGNORECASE)
+    return sanitizado[:300]
 
 
 @lru_cache(maxsize=4)
@@ -74,23 +141,182 @@ def limpar_cache_idempotencia() -> None:
     _CACHE_IDEMPOTENCIA_MODULO.clear()
     _EXTRACOES_PENDENTES_MODULO.clear()
     _criar_repositorio_padrao.cache_clear()
+    with _LOCK_LOCKS_MSG:
+        _LOCKS_POR_MSG.clear()
 
 
-def _reconstruir_base_de_pendente(pendente_db: RegistroAtestadoDB) -> AtestadoExtraido:
-    """Reconstrói `AtestadoExtraido` base a partir de um registro `PENDENTE` do banco."""
+def _reconstruir_base_de_pendente(
+    pendente_db: RegistroAtestadoDB,
+    repositorio: RepositorioA1Protocol | None = None,
+) -> AtestadoExtraido:
+    """Reconstrói `AtestadoExtraido` base a partir do banco (`atestado` + `atestado_campo` + `cid_restrito`)."""
+    profissional = ProfissionalExtraido()
+    municipio: str | None = None
+    nome_no_documento: str | None = None
+    tipo_documento = pendente_db.tipo_documento
+    cid = pendente_db.codigo_cid
+    campos_meta: dict[str, CampoMetadado] = {}
+
+    if repositorio is not None:
+        if hasattr(repositorio, "obter_profissional"):
+            prof_dict = repositorio.obter_profissional(pendente_db.id_profissional)
+            if prof_dict:
+                profissional = ProfissionalExtraido(**prof_dict)
+        if hasattr(repositorio, "obter_municipio"):
+            mun_tupla = repositorio.obter_municipio(pendente_db.id_municipio)
+            if mun_tupla:
+                municipio = mun_tupla[0]
+        if cid is None and hasattr(repositorio, "obter_cid_restrito"):
+            cid_reg = repositorio.obter_cid_restrito(pendente_db.id_atestado)
+            if cid_reg is not None:
+                cid = cid_reg.codigo_cid
+        if hasattr(repositorio, "listar_campos_atestado"):
+            for reg_campo in repositorio.listar_campos_atestado(pendente_db.id_atestado):
+                valor = (
+                    reg_campo.valor_confirmado
+                    if reg_campo.valor_confirmado is not None
+                    else reg_campo.valor_extraido
+                )
+                if reg_campo.nome_campo == "nome_no_documento" and valor is not None:
+                    nome_no_documento = valor
+                elif reg_campo.nome_campo == "tipo_documento" and valor in {
+                    "atestado_medico",
+                    "declaracao_comparecimento",
+                    "outro",
+                }:
+                    tipo_documento = valor  # type: ignore[assignment]
+                elif reg_campo.nome_campo == "municipio" and valor is not None:
+                    municipio = valor
+                elif reg_campo.nome_campo == "cid" and valor is not None:
+                    cid = valor
+                elif reg_campo.nome_campo == "profissional.nome" and valor is not None:
+                    profissional.nome = valor
+
+                if reg_campo.vazio_por_baixa_confianca:
+                    campos_meta[reg_campo.nome_campo] = CampoMetadado(
+                        confianca=reg_campo.confianca,
+                        origem=reg_campo.origem,
+                        vazio_por_baixa_confianca=True,
+                    )
+
     return AtestadoExtraido(
+        tipo_documento=tipo_documento,
         legibilidade="ok",
+        nome_no_documento=nome_no_documento,
         periodo=PeriodoAfastamento(
             inicio=pendente_db.inicio_afastamento.date(),
             fim=pendente_db.fim_afastamento.date(),
         ),
         data_emissao=pendente_db.data_emissao,
-        cid=pendente_db.codigo_cid,
+        profissional=profissional,
+        cid=cid,
+        municipio=municipio,
+        campos=campos_meta,
     )
 
 
+def _valores_campos_atestado(
+    atestado: AtestadoExtraido, *, politica_extrair_cid: bool
+) -> list[tuple[str, str | None]]:
+    dias = atestado.periodo.dias_calculados
+    pares: list[tuple[str, str | None]] = [
+        ("tipo_documento", atestado.tipo_documento),
+        ("nome_no_documento", atestado.nome_no_documento),
+        (
+            "periodo.inicio",
+            atestado.periodo.inicio.isoformat()
+            if atestado.periodo.inicio is not None
+            else None,
+        ),
+        (
+            "periodo.fim",
+            atestado.periodo.fim.isoformat()
+            if atestado.periodo.fim is not None
+            else None,
+        ),
+        ("periodo.dias", str(dias) if dias is not None else None),
+        (
+            "data_emissao",
+            atestado.data_emissao.isoformat()
+            if atestado.data_emissao is not None
+            else None,
+        ),
+        ("profissional.conselho", atestado.profissional.conselho),
+        ("profissional.numero", atestado.profissional.numero),
+        ("profissional.uf", atestado.profissional.uf),
+        ("profissional.nome", atestado.profissional.nome),
+        ("municipio", atestado.municipio),
+    ]
+    if politica_extrair_cid:
+        pares.append(("cid", atestado.cid))
+    return pares
+
+
+def _montar_campos_extracao(
+    extraido: AtestadoExtraido, *, politica_extrair_cid: bool
+) -> list[dict[str, Any]]:
+    conf_map = extraido.confianca_campos or {}
+    registros: list[dict[str, Any]] = []
+    for nome_campo, valor in _valores_campos_atestado(
+        extraido, politica_extrair_cid=politica_extrair_cid
+    ):
+        meta = extraido.campos.get(nome_campo)
+        conf = meta.confianca if meta is not None else conf_map.get(nome_campo)
+        if conf is not None:
+            conf = round(max(0.0, min(1.0, float(conf))), 4)
+        registros.append(
+            {
+                "nome_campo": nome_campo,
+                "valor_extraido": valor,
+                "confianca": conf,
+                "origem": "IA",
+                "vazio_por_baixa_confianca": bool(
+                    meta.vazio_por_baixa_confianca if meta is not None else False
+                ),
+            }
+        )
+    return registros
+
+
+def _montar_campos_confirmacao(
+    confirmado: AtestadoExtraido,
+    campos_corrigidos: Sequence[str],
+    *,
+    politica_extrair_cid: bool,
+) -> list[dict[str, Any]]:
+    alias_para_canonico = {
+        "inicio": "periodo.inicio",
+        "fim": "periodo.fim",
+        "dias": "periodo.dias",
+        "conselho": "profissional.conselho",
+        "numero": "profissional.numero",
+        "uf": "profissional.uf",
+    }
+    corrigidos = {
+        alias_para_canonico.get(c.strip(), c.strip())
+        for c in campos_corrigidos
+        if c and c.strip()
+    }
+    if "periodo.inicio" in corrigidos or "periodo.fim" in corrigidos:
+        corrigidos.add("periodo.dias")
+
+    registros: list[dict[str, Any]] = []
+    for nome_campo, valor in _valores_campos_atestado(
+        confirmado, politica_extrair_cid=politica_extrair_cid
+    ):
+        registros.append(
+            {
+                "nome_campo": nome_campo,
+                "valor_confirmado": valor,
+                "origem": "MANUAL" if nome_campo in corrigidos else "IA",
+                "vazio_por_baixa_confianca": False,
+            }
+        )
+    return registros
+
+
 def _formatar_atestado_payload(extraido: AtestadoExtraido) -> dict[str, Any]:
-    """Serializa `AtestadoExtraido` no formato público do Anexo C.2 / D.2."""
+    """Serializa `AtestadoExtraido` no formato público do Anexo C.2 / D.2 e Guia A1 v0.7."""
     prof_dict: dict[str, Any] = {
         "conselho": extraido.profissional.conselho,
         "numero": extraido.profissional.numero,
@@ -100,6 +326,7 @@ def _formatar_atestado_payload(extraido: AtestadoExtraido) -> dict[str, Any]:
         prof_dict["nome"] = extraido.profissional.nome
 
     return {
+        "tipo_documento": extraido.tipo_documento,
         "legibilidade": extraido.legibilidade,
         "nome_no_documento": extraido.nome_no_documento,
         "periodo": {
@@ -113,6 +340,7 @@ def _formatar_atestado_payload(extraido: AtestadoExtraido) -> dict[str, Any]:
                 if extraido.periodo.fim is not None
                 else None
             ),
+            "dias": extraido.periodo.dias_calculados,
         },
         "data_emissao": (
             extraido.data_emissao.isoformat()
@@ -122,6 +350,10 @@ def _formatar_atestado_payload(extraido: AtestadoExtraido) -> dict[str, Any]:
         "profissional": prof_dict,
         "cid": extraido.cid,
         "municipio": extraido.municipio,
+        "campos": {
+            chave: meta.model_dump(mode="json")
+            for chave, meta in extraido.campos.items()
+        },
     }
 
 
@@ -146,6 +378,8 @@ def _serializar_saida(saida: SaidaMensagem, *, completa: bool) -> dict[str, Any]
             if isinstance(saida.agendar_para, datetime)
             else saida.agendar_para
         )
+    if saida.sensivel:
+        dado["sensivel"] = True
     return dado
 
 
@@ -223,7 +457,7 @@ class ServicoA1:
         repositorio: RepositorioA1Protocol | None = None,
         llm: Any | None = None,
         config: A1Config | None = None,
-        cache_idempotencia: dict[str, dict[str, Any]] | None = None,
+        cache_idempotencia: Any | None = None,
         extracoes_pendentes: dict[tuple[str | int, int, int | None], AtestadoExtraido]
         | None = None,
     ) -> None:
@@ -234,8 +468,10 @@ class ServicoA1:
             else _criar_repositorio_padrao(self.config.database_url.strip())
         )
         self.llm = llm
-        self._cache_idempotencia: dict[str, dict[str, Any]] = (
-            cache_idempotencia if cache_idempotencia is not None else {}
+        self._cache_idempotencia: Any = (
+            cache_idempotencia
+            if cache_idempotencia is not None
+            else _CacheIdempotenciaLimitado(max_entries=2048)
         )
         self._extracoes_pendentes: dict[
             tuple[str | int, int, int | None], AtestadoExtraido
@@ -327,6 +563,43 @@ class ServicoA1:
         )
         return resultado, True
 
+    def _resposta_duplicada(
+        self, tarefa: TarefaA1, duplicado: RegistroAtestadoDB
+    ) -> ResultadoA1:
+        atestado_dup = AtestadoExtraido(
+            legibilidade="ok",
+            periodo=PeriodoAfastamento(
+                inicio=duplicado.inicio_afastamento.date(),
+                fim=duplicado.fim_afastamento.date(),
+            ),
+            data_emissao=duplicado.data_emissao,
+            cid=duplicado.codigo_cid,
+        )
+        return ResultadoA1.a_partir_da_tarefa(
+            tarefa,
+            status="PRECISA_HUMANO",
+            estado_proposto="RECEBIDO",
+            payload={
+                "atestado_extraido": _formatar_atestado_payload(atestado_dup),
+                "divergencias": [],
+            },
+            saidas=[
+                SaidaMensagem(
+                    tipo="mensagem",
+                    texto=(
+                        "Este arquivo de atestado já foi recebido anteriormente "
+                        f"(registro #{duplicado.id_atestado}). Deseja confirmar "
+                        "os dados ou enviar outro documento?"
+                    ),
+                )
+            ],
+            eventos=[],
+            decisao=DecisaoAgente(
+                motivo="arquivo duplicado ja recebido anteriormente",
+                usou_llm=False,
+            ),
+        )
+
     def _executar_processar_documento(
         self, tarefa: TarefaA1, payload: PayloadProcessarDocumentoTarefa
     ) -> tuple[ResultadoA1, bool]:
@@ -337,49 +610,25 @@ class ServicoA1:
         )
 
         duplicado = self.repositorio.verificar_duplicidade_arquivo(
-            payload.arquivo_uri, id_colaborador=id_colaborador
+            payload.arquivo_uri, id_colaborador=id_colaborador, sha256=payload.sha256
         )
         if duplicado is not None:
-            atestado_dup = AtestadoExtraido(
-                legibilidade="ok",
-                periodo={
-                    "inicio": duplicado.inicio_afastamento.date(),
-                    "fim": duplicado.fim_afastamento.date(),
-                },
-                data_emissao=duplicado.data_emissao,
-                cid=duplicado.codigo_cid,
-            )
-            resultado = ResultadoA1.a_partir_da_tarefa(
-                tarefa,
-                status="PRECISA_HUMANO",
-                estado_proposto="RECEBIDO",
-                payload={
-                    "atestado_extraido": _formatar_atestado_payload(atestado_dup),
-                    "divergencias": [],
-                },
-                saidas=[
-                    SaidaMensagem(
-                        tipo="mensagem",
-                        texto=(
-                            "Este arquivo de atestado já foi recebido anteriormente "
-                            f"(registro #{duplicado.id_atestado}). Deseja confirmar "
-                            "os dados ou enviar outro documento?"
-                        ),
-                    )
-                ],
-                eventos=[],
-                decisao=DecisaoAgente(
-                    motivo="arquivo duplicado ja recebido anteriormente",
-                    usou_llm=False,
-                ),
-            )
-            return resultado, False
+            return self._resposta_duplicada(tarefa, duplicado), False
 
         res_ocr = processar_arquivo_atestado(
             payload.arquivo_uri,
             mime=payload.mime,
             sha256_esperado=payload.sha256,
         )
+        if res_ocr.sha256:
+            duplicado_sha = self.repositorio.verificar_duplicidade_arquivo(
+                payload.arquivo_uri,
+                id_colaborador=id_colaborador,
+                sha256=res_ocr.sha256,
+            )
+            if duplicado_sha is not None:
+                return self._resposta_duplicada(tarefa, duplicado_sha), False
+
         extraido, decisao = extrair_atestado_via_llm(
             res_ocr, llm=self.llm, config=self.config
         )
@@ -410,6 +659,26 @@ class ServicoA1:
         inicio = extraido.periodo.inicio
         fim = extraido.periodo.fim
         if inicio is not None and fim is not None and fim >= inicio:
+            sobrepostos = [
+                at
+                for at in self.repositorio.listar_atestados_sobrepostos(
+                    id_colaborador, inicio, fim
+                )
+                if at.status == "CONFIRMADO"
+            ]
+            for sobreposto in sobrepostos:
+                divergencias.append(
+                    DivergenciaCampo(
+                        campo="sobreposicao",
+                        no_documento=f"{inicio.isoformat()} a {fim.isoformat()}",
+                        informado=(
+                            f"atestado #{sobreposto.id_atestado} "
+                            f"({sobreposto.inicio_afastamento.date().isoformat()} a "
+                            f"{sobreposto.fim_afastamento.date().isoformat()})"
+                        ),
+                    )
+                )
+
             id_prof = self._resolver_id_profissional(
                 extraido,
                 uf_fallback=(
@@ -428,7 +697,7 @@ class ServicoA1:
                 extraido.cid, politica_extrair_cid=self.config.politica_extrair_cid
             )
             if id_prof is not None and id_municipio is not None:
-                self.repositorio.salvar_atestado_pendente(
+                reg_pendente = self.repositorio.salvar_atestado_pendente(
                     id_colaborador=id_colaborador,
                     id_profissional=id_prof,
                     id_municipio=id_municipio,
@@ -438,7 +707,21 @@ class ServicoA1:
                     arquivo_uri=payload.arquivo_uri,
                     codigo_cid=cid_valido,
                     origem_dados="IA",
+                    arquivo_sha256=res_ocr.sha256,
+                    id_caso=id_caso,
+                    tipo_documento=extraido.tipo_documento,
+                    arquivo_mime=res_ocr.mime or payload.mime,
+                    politica_cid_restrito=True,
                 )
+                if hasattr(self.repositorio, "salvar_campos_atestado"):
+                    self.repositorio.salvar_campos_atestado(
+                        reg_pendente.id_atestado,
+                        _montar_campos_extracao(
+                            extraido,
+                            politica_extrair_cid=self.config.politica_extrair_cid,
+                        ),
+                        id_caso=id_caso,
+                    )
 
         motivo_decisao = "documento legivel extraido pelo LLM"
         if divergencias:
@@ -486,7 +769,9 @@ class ServicoA1:
         base_extraida = self._obter_extracao_pendente(tarefa)
         pendente_db = self.repositorio.obter_ultimo_atestado_pendente(id_colaborador)
         if base_extraida is None and pendente_db is not None:
-            base_extraida = _reconstruir_base_de_pendente(pendente_db)
+            base_extraida = _reconstruir_base_de_pendente(
+                pendente_db, repositorio=self.repositorio
+            )
 
         mesclado = mesclar_atestado_confirmado(
             payload.atestado_confirmado, base_extraida
@@ -506,18 +791,17 @@ class ServicoA1:
             else 0
         )
 
+        conselhos_aceitos = (
+            self.repositorio.listar_conselhos_validos(mesclado.profissional.uf or "SP")
+            if hasattr(self.repositorio, "listar_conselhos_validos")
+            else ()
+        ) or ("CRM", "CRO", "CRP")
+
         validacao = validar_dados_confirmados(
             mesclado,
             payload.campos_corrigidos,
             colaborador_ativo=colaborador_ativo,
-            conselhos_aceitos=tuple(
-                c
-                for c in ("CRM", "CRO", "CRP")
-                if self.repositorio.validar_conselho_profissional(
-                    c, mesclado.profissional.uf or "SP"
-                )
-            )
-            or ("CRM", "CRO", "CRP"),
+            conselhos_aceitos=conselhos_aceitos,
             politica_extrair_cid=self.config.politica_extrair_cid,
             dias_uteis_entrega_fisica=self.config.prazo_entrega_fisica_dias_uteis,
             dias_acumulados_60d=dias_acumulados,
@@ -536,6 +820,26 @@ class ServicoA1:
             if id_caso is not None:
                 dados_evento_inv["id_caso"] = id_caso
 
+            saidas_inv = [
+                SaidaMensagem(
+                    tipo="mensagem", texto=validacao.mensagem_usuario
+                )
+            ]
+            if validacao.codigo_evento == "colaborador_inativo":
+                saidas_inv.append(
+                    SaidaMensagem(
+                        tipo="mensagem",
+                        para=DestinatarioSaida(perfil="rh"),
+                        nivel_detalhe="individual",
+                        texto=(
+                            f"Colaborador #{id_colaborador} apresentou atestado com "
+                            f"cadastro inativo no período ({inicio} a {fim}). "
+                            "Favor verificar vínculo."
+                        ),
+                        sensivel=False,
+                    )
+                )
+
             resultado = ResultadoA1.a_partir_da_tarefa(
                 tarefa,
                 status="OK",
@@ -543,11 +847,7 @@ class ServicoA1:
                 payload=PayloadConfirmarInvalidoResultado(
                     motivo=validacao.motivo or "dados inválidos",
                 ),
-                saidas=[
-                    SaidaMensagem(
-                        tipo="mensagem", texto=validacao.mensagem_usuario
-                    )
-                ],
+                saidas=saidas_inv,
                 eventos=[
                     EventoEmitido(tipo="atestado.invalido", dados=dados_evento_inv)
                 ],
@@ -591,6 +891,12 @@ class ServicoA1:
             mesclado.cid, politica_extrair_cid=self.config.politica_extrair_cid
         )
 
+        prazos_legais = (
+            validacao.marcos_legais.codigos_prazos_legais()
+            if validacao.marcos_legais is not None
+            else []
+        )
+
         if pendente_db is None:
             if id_prof is None or id_municipio is None:
                 raise ValueError(
@@ -606,6 +912,9 @@ class ServicoA1:
                 arquivo_uri=f"local://caso-{id_caso or id_colaborador}-confirmado",
                 codigo_cid=cid_valido,
                 origem_dados=validacao.origem,
+                id_caso=id_caso,
+                tipo_documento=mesclado.tipo_documento,
+                politica_cid_restrito=True,
             )
 
         codigo_cid_final = cid_valido if self.config.politica_extrair_cid else None
@@ -619,7 +928,20 @@ class ServicoA1:
             id_profissional=id_prof if id_prof is not None else pendente_db.id_profissional,
             codigo_cid=codigo_cid_final,
             id_municipio=id_municipio if id_municipio is not None else pendente_db.id_municipio,
+            tipo_documento=mesclado.tipo_documento,
+            prazos_legais=prazos_legais,
+            politica_cid_restrito=True,
         )
+        if hasattr(self.repositorio, "salvar_campos_atestado"):
+            self.repositorio.salvar_campos_atestado(
+                confirmado.id_atestado,
+                _montar_campos_confirmacao(
+                    mesclado,
+                    payload.campos_corrigidos,
+                    politica_extrair_cid=self.config.politica_extrair_cid,
+                ),
+                id_caso=id_caso,
+            )
 
         self._extracoes_pendentes.pop(self._chave_pendente(tarefa), None)
 
@@ -631,6 +953,7 @@ class ServicoA1:
         dados_evento_ok: dict[str, Any] = {
             "id_atestado": confirmado.id_atestado,
             "dias": validacao.dias,
+            "prazos_legais": prazos_legais,
         }
         if id_caso is not None:
             dados_evento_ok["id_caso"] = id_caso
@@ -644,6 +967,7 @@ class ServicoA1:
                 status_atestado="CONFIRMADO",
                 origem=validacao.origem,
                 prazo_entrega_fisica=validacao.prazo_entrega_fisica,
+                prazos_legais=prazos_legais,
             ),
             saidas=[
                 SaidaMensagem(tipo="mensagem", texto=validacao.mensagem_usuario)
@@ -658,10 +982,17 @@ class ServicoA1:
     def _executar_registrar_baixa_fisica(
         self, tarefa: TarefaA1, payload: PayloadBaixaFisicaTarefa
     ) -> tuple[ResultadoA1, bool]:
+        perfil_chamador = tarefa.contexto.perfil.strip().lower()
+        if perfil_chamador not in {"rh", "admin"}:
+            raise PermissionError(
+                f"Perfil '{tarefa.contexto.perfil}' não autorizado para registrar baixa física."
+            )
+
         self.repositorio.registrar_baixa_fisica_no_banco(
             payload.id_atestado,
             payload.recebido_fisico_por,
             payload.recebido_fisico_em,
+            perfis_permitidos=("RH", "ADMIN"),
         )
 
         recebido_em_str = (
@@ -677,6 +1008,8 @@ class ServicoA1:
                 id_atestado=payload.id_atestado,
                 recebido_fisico_por=payload.recebido_fisico_por,
                 recebido_fisico_em=recebido_em_str,
+                recebido_por=payload.recebido_fisico_por,
+                data_hora=recebido_em_str,
             ),
             saidas=[
                 SaidaMensagem(
@@ -705,63 +1038,114 @@ class ServicoA1:
             else TarefaA1.model_validate(tarefa)
         )
 
-        if tarefa_obj.id_mensagem in self._cache_idempotencia:
-            return copy.deepcopy(self._cache_idempotencia[tarefa_obj.id_mensagem])
+        lock_msg = _obter_lock_mensagem(tarefa_obj.id_mensagem)
+        with lock_msg:
+            if tarefa_obj.id_mensagem in self._cache_idempotencia:
+                return copy.deepcopy(self._cache_idempotencia[tarefa_obj.id_mensagem])
 
-        try:
-            payload_validado = tarefa_obj.validar_payload_acao()
-        except ValidationError as exc:
-            erro_res = _montar_erro(
-                tarefa_obj,
-                codigo="PAYLOAD_INVALIDO",
-                mensagem=f"Payload inválido para {tarefa_obj.acao}: {exc}",
-                reprocessavel=False,
-            )
-            serializado = _serializar_resultado(erro_res)
+            try:
+                payload_validado = tarefa_obj.validar_payload_acao()
+            except ValidationError as exc:
+                erro_res = _montar_erro(
+                    tarefa_obj,
+                    codigo="PAYLOAD_INVALIDO",
+                    mensagem=f"Payload inválido para {tarefa_obj.acao}: {exc}",
+                    reprocessavel=False,
+                )
+                serializado = _serializar_resultado(erro_res)
+                self._cache_idempotencia[tarefa_obj.id_mensagem] = copy.deepcopy(serializado)
+                return serializado
+
+            try:
+                if isinstance(payload_validado, PayloadConversarTarefa):
+                    resultado, saida_completa = self._executar_conversar(
+                        tarefa_obj, payload_validado
+                    )
+                elif isinstance(payload_validado, PayloadProcessarDocumentoTarefa):
+                    resultado, saida_completa = self._executar_processar_documento(
+                        tarefa_obj, payload_validado
+                    )
+                elif isinstance(payload_validado, PayloadConfirmarTarefa):
+                    resultado, saida_completa = self._executar_confirmar(
+                        tarefa_obj, payload_validado
+                    )
+                elif isinstance(payload_validado, PayloadBaixaFisicaTarefa):
+                    resultado, saida_completa = self._executar_registrar_baixa_fisica(
+                        tarefa_obj, payload_validado
+                    )
+                else:  # pragma: no cover - protegido por Literal em TarefaA1
+                    raise TypeError(f"Ação não suportada: {tarefa_obj.acao}")
+            except PermissionError as exc:
+                erro_res = _montar_erro(
+                    tarefa_obj,
+                    codigo="NAO_AUTORIZADO",
+                    mensagem=str(exc),
+                    reprocessavel=False,
+                )
+                serializado = _serializar_resultado(erro_res)
+                self._cache_idempotencia[tarefa_obj.id_mensagem] = copy.deepcopy(serializado)
+                return serializado
+            except (FileNotFoundError, ValueError) as exc:
+                erro_res = _montar_erro(
+                    tarefa_obj,
+                    codigo="ERRO_VALIDACAO_A1",
+                    mensagem=_sanitizar_mensagem_erro(str(exc)),
+                    reprocessavel=False,
+                )
+                serializado = _serializar_resultado(erro_res)
+                self._cache_idempotencia[tarefa_obj.id_mensagem] = copy.deepcopy(serializado)
+                return serializado
+            except Exception as exc:
+                _LOGGER.exception(
+                    "Erro interno no Agente A1 (%s) [%s]",
+                    tarefa_obj.acao,
+                    type(exc).__name__,
+                )
+                erro_res = _montar_erro(
+                    tarefa_obj,
+                    codigo="ERRO_INTERNO_A1",
+                    mensagem="Falha interna ao processar a tarefa no Agente A1.",
+                    reprocessavel=True,
+                )
+                return _serializar_resultado(erro_res)
+
+            serializado = _serializar_resultado(resultado, saida_completa=saida_completa)
             self._cache_idempotencia[tarefa_obj.id_mensagem] = copy.deepcopy(serializado)
             return serializado
 
-        try:
-            if isinstance(payload_validado, PayloadConversarTarefa):
-                resultado, saida_completa = self._executar_conversar(
-                    tarefa_obj, payload_validado
-                )
-            elif isinstance(payload_validado, PayloadProcessarDocumentoTarefa):
-                resultado, saida_completa = self._executar_processar_documento(
-                    tarefa_obj, payload_validado
-                )
-            elif isinstance(payload_validado, PayloadConfirmarTarefa):
-                resultado, saida_completa = self._executar_confirmar(
-                    tarefa_obj, payload_validado
-                )
-            elif isinstance(payload_validado, PayloadBaixaFisicaTarefa):
-                resultado, saida_completa = self._executar_registrar_baixa_fisica(
-                    tarefa_obj, payload_validado
-                )
-            else:  # pragma: no cover - protegido por Literal em TarefaA1
-                raise TypeError(f"Ação não suportada: {tarefa_obj.acao}")
-        except (FileNotFoundError, ValueError) as exc:
-            erro_res = _montar_erro(
-                tarefa_obj,
-                codigo="ERRO_VALIDACAO_A1",
-                mensagem=str(exc),
-                reprocessavel=False,
-            )
-            serializado = _serializar_resultado(erro_res)
-            self._cache_idempotencia[tarefa_obj.id_mensagem] = copy.deepcopy(serializado)
-            return serializado
-        except Exception as exc:  # noqa: BLE001
-            erro_res = _montar_erro(
-                tarefa_obj,
-                codigo="ERRO_INTERNO_A1",
-                mensagem=str(exc),
-                reprocessavel=True,
-            )
-            return _serializar_resultado(erro_res)
 
-        serializado = _serializar_resultado(resultado, saida_completa=saida_completa)
-        self._cache_idempotencia[tarefa_obj.id_mensagem] = copy.deepcopy(serializado)
-        return serializado
+class AgenteA1(ServicoA1):
+    """Alias oficial do Guia A1 v0.7 (`AgenteA1(db=sessao, llm=cliente_groq)`)."""
+
+    def __init__(
+        self,
+        *,
+        db: Any | None = None,
+        repositorio: RepositorioA1Protocol | None = None,
+        llm: Any | None = None,
+        config: A1Config | None = None,
+        cache_idempotencia: Any | None = None,
+        extracoes_pendentes: dict[tuple[str | int, int, int | None], AtestadoExtraido]
+        | None = None,
+    ) -> None:
+        cfg = config or obter_config_a1()
+        repo_final: RepositorioA1Protocol | None
+        if repositorio is not None:
+            repo_final = repositorio
+        elif db is None:
+            repo_final = None
+        elif isinstance(db, RepositorioA1Protocol):
+            repo_final = db
+        else:
+            repo_final = RepositorioA1Postgres(cfg.database_url, conn=db)
+
+        super().__init__(
+            repositorio=repo_final,
+            llm=llm,
+            config=cfg,
+            cache_idempotencia=cache_idempotencia,
+            extracoes_pendentes=extracoes_pendentes,
+        )
 
 
 def executar(

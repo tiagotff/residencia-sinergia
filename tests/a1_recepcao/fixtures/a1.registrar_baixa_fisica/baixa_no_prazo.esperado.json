@@ -16,7 +16,9 @@
   "payload": {
     "id_atestado": 311,
     "recebido_fisico_por": "rh.ana",
-    "recebido_fisico_em": "2026-11-13T10:20:00-03:00"
+    "recebido_fisico_em": "2026-11-13T10:20:00-03:00",
+    "recebido_por": "rh.ana",
+    "data_hora": "2026-11-13T10:20:00-03:00"
   },
   "saidas": [
     {

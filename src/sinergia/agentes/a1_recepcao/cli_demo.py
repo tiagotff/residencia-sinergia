@@ -30,8 +30,8 @@ from sinergia.agentes.a1_recepcao.config import A1Config, obter_config_a1
 from sinergia.agentes.a1_recepcao.extrator_llm import MockLLM
 from sinergia.agentes.a1_recepcao.gerador_sintetico import (
     GabaritoAtestadoSintetico,
-    gerar_atestados_golden,
     garantir_atestados_sinteticos,
+    gerar_atestados_golden,
 )
 from sinergia.agentes.a1_recepcao.repositorio import (
     RepositorioA1Memoria,

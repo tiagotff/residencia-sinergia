@@ -55,6 +55,7 @@ def _registro_inicial_padrao(
     nome: str = "Carla S.",
     inicio_informado: str = "2026-11-09",
     dias_informados: int = 3,
+    tipo_solicitacao: str = "atestado_medico",
 ) -> dict[str, Any]:
     return {
         "id_caso": id_caso,
@@ -71,7 +72,7 @@ def _registro_inicial_padrao(
         "jornada_fim": "16:00",
         "municipio": "Campinas",
         "uf": "SP",
-        "tipo_solicitacao": "atestado_medico",
+        "tipo_solicitacao": tipo_solicitacao,
         "inicio_informado": inicio_informado,
         "dias_informados": dias_informados,
         "tem_documento": True,
@@ -308,6 +309,11 @@ def test_variedade_atestados_legiveis_conselhos_divergencias_e_marcos_30_dias(
                 id_caso=600 + idx,
                 inicio_informado=inicio_esp.isoformat(),
                 dias_informados=dias_esp,
+                tipo_solicitacao=(
+                    "declaracao_comparecimento"
+                    if id_amostra == "declaracao_comparecimento_1dia"
+                    else "atestado_medico"
+                ),
             ),
             "payload": {
                 "arquivo_uri": amostra.arquivo_png,

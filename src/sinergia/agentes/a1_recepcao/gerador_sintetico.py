@@ -578,7 +578,7 @@ def _renderizar_atestado_golden(
     draw = ImageDraw.Draw(imagem)
 
     fontes = _fontes_golden()
-    nome_fonte, caminho_fonte = rng.choice(fontes)
+    _nome_fonte, caminho_fonte = rng.choice(fontes)
     fonte_clinica = (
         ImageFont.truetype(caminho_fonte, 32)
         if Path(caminho_fonte).is_file()

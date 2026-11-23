@@ -16,7 +16,14 @@ from datetime import date, datetime
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 PROTOCOLO_SINERGIA = "sinergia/1"
 
@@ -84,6 +91,16 @@ class ResultadoOCR(BaseModel):
     )
 
 
+class CampoMetadado(BaseModel):
+    """Metadados de confiança, origem e descarte por baixa confiança por campo (Guia A1 v0.7)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confianca: float | None = Field(default=None, ge=0.0, le=1.0)
+    origem: OrigemDadosAtestado = "IA"
+    vazio_por_baixa_confianca: bool = False
+
+
 class PeriodoAfastamento(BaseModel):
     """Período de afastamento extraído ou confirmado (Anexo D.2)."""
 
@@ -95,6 +112,21 @@ class PeriodoAfastamento(BaseModel):
     fim: date | None = Field(
         default=None, description="Data de término do afastamento."
     )
+    dias: int | None = Field(
+        default=None,
+        description="Quantidade inclusiva de dias (fim - inicio + 1).",
+    )
+
+    @model_validator(mode="after")
+    def _preencher_dias(self) -> PeriodoAfastamento:
+        if (
+            self.dias is None
+            and self.inicio is not None
+            and self.fim is not None
+            and self.fim >= self.inicio
+        ):
+            self.dias = (self.fim - self.inicio).days + 1
+        return self
 
     @property
     def dias_calculados(self) -> int | None:
@@ -158,6 +190,10 @@ class AtestadoExtraido(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    tipo_documento: TipoDocumentoAfastamento = Field(
+        default="atestado_medico",
+        description="Tipo do documento (atestado_medico, declaracao_comparecimento, outro).",
+    )
     legibilidade: LegibilidadeDocumento = Field(
         default="ok",
         description="'ok' se o documento é um atestado legível; 'ilegivel' caso contrário.",
@@ -184,6 +220,10 @@ class AtestadoExtraido(BaseModel):
     municipio: str | None = Field(
         default=None, description="Município de emissão do atestado."
     )
+    campos: dict[str, CampoMetadado] = Field(
+        default_factory=dict,
+        description="Metadados de confiança, origem e descarte por baixa confiança por campo (Guia A1 v0.7).",
+    )
     confianca_campos: dict[str, float] | None = Field(
         default=None,
         exclude_if=lambda v: v is None,
@@ -207,7 +247,8 @@ class AtestadoExtraido(BaseModel):
         """Aplica a Política de CID (Anexo G) e o limiar de confiança por campo (Anexo E.2).
 
         Campos cuja confiança em `confianca_campos` seja inferior a `limiar_confianca`
-        são esvaziados (`None`) para que o A1 jamais adivinhe valores duvidosos.
+        são esvaziados (`None`) e registrados em `campos` com `vazio_por_baixa_confianca=True`
+        para que o A1 jamais adivinhe valores duvidosos.
         """
         copia = self.model_copy(deep=True)
         if not extrair_cid:
@@ -215,24 +256,50 @@ class AtestadoExtraido(BaseModel):
 
         if copia.confianca_campos:
             c = copia.confianca_campos
-            if c.get("nome_no_documento", 1.0) < limiar_confianca:
+            campos_meta: dict[str, CampoMetadado] = dict(copia.campos)
+
+            def _checar_e_zerar(chave_canonica: str, alias: str | None = None) -> bool:
+                score = c.get(chave_canonica)
+                if score is None and alias is not None:
+                    score = c.get(alias)
+                if score is None or score >= limiar_confianca:
+                    return False
+                campos_meta[chave_canonica] = CampoMetadado(
+                    confianca=round(max(0.0, min(1.0, float(score))), 4),
+                    origem="IA",
+                    vazio_por_baixa_confianca=True,
+                )
+                return True
+
+            if _checar_e_zerar("nome_no_documento"):
                 copia.nome_no_documento = None
-            if c.get("periodo.inicio", c.get("inicio", 1.0)) < limiar_confianca:
+            if _checar_e_zerar("periodo.inicio", "inicio"):
                 copia.periodo.inicio = None
-            if c.get("periodo.fim", c.get("fim", 1.0)) < limiar_confianca:
+            if _checar_e_zerar("periodo.fim", "fim"):
                 copia.periodo.fim = None
-            if c.get("data_emissao", 1.0) < limiar_confianca:
+            if _checar_e_zerar("data_emissao"):
                 copia.data_emissao = None
-            if c.get("profissional.conselho", c.get("conselho", 1.0)) < limiar_confianca:
+            if _checar_e_zerar("profissional.conselho", "conselho"):
                 copia.profissional.conselho = None
-            if c.get("profissional.numero", c.get("numero", 1.0)) < limiar_confianca:
+            if _checar_e_zerar("profissional.numero", "numero"):
                 copia.profissional.numero = None
-            if c.get("profissional.uf", c.get("uf", 1.0)) < limiar_confianca:
+            if _checar_e_zerar("profissional.uf", "uf"):
                 copia.profissional.uf = None
-            if c.get("cid", 1.0) < limiar_confianca:
+            if _checar_e_zerar("cid"):
                 copia.cid = None
-            if c.get("municipio", 1.0) < limiar_confianca:
+            if _checar_e_zerar("municipio"):
                 copia.municipio = None
+
+            copia.campos = campos_meta
+
+        if (
+            copia.periodo.inicio is not None
+            and copia.periodo.fim is not None
+            and copia.periodo.fim >= copia.periodo.inicio
+        ):
+            copia.periodo.dias = (copia.periodo.fim - copia.periodo.inicio).days + 1
+        else:
+            copia.periodo.dias = None
 
         return copia
 
@@ -336,6 +403,10 @@ class PayloadConfirmarValidoResultado(BaseModel):
     status_atestado: Literal["CONFIRMADO"] = "CONFIRMADO"
     origem: OrigemDadosAtestado
     prazo_entrega_fisica: date
+    prazos_legais: list[str] = Field(
+        default_factory=list,
+        description="Marcos legais aplicáveis: 'inss_16_dias', 'exame_retorno' (Guia A1 v0.7).",
+    )
 
 
 class PayloadConfirmarInvalidoResultado(BaseModel):
@@ -350,15 +421,18 @@ class PayloadConfirmarInvalidoResultado(BaseModel):
 class PayloadBaixaFisicaTarefa(BaseModel):
     """Variáveis enviadas pelo A0 em `a1.registrar_baixa_fisica` (Anexo C.2 e D.2)."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     id_atestado: int
     recebido_fisico_por: str | int = Field(
         ...,
+        validation_alias=AliasChoices("recebido_fisico_por", "recebido_por"),
         description="Identificador ou login do usuário de RH que recebeu o original.",
     )
     recebido_fisico_em: datetime | str = Field(
-        ..., description="Data/hora ISO 8601 do recebimento do atestado físico."
+        ...,
+        validation_alias=AliasChoices("recebido_fisico_em", "data_hora"),
+        description="Data/hora ISO 8601 do recebimento do atestado físico.",
     )
 
 
@@ -370,6 +444,16 @@ class PayloadBaixaFisicaResultado(BaseModel):
     id_atestado: int
     recebido_fisico_por: str | int
     recebido_fisico_em: datetime | str
+    recebido_por: str | int | None = None
+    data_hora: datetime | str | None = None
+
+    @model_validator(mode="after")
+    def _preencher_aliases_guia(self) -> PayloadBaixaFisicaResultado:
+        if self.recebido_por is None:
+            self.recebido_por = self.recebido_fisico_por
+        if self.data_hora is None:
+            self.data_hora = self.recebido_fisico_em
+        return self
 
 
 # ============================================================================
@@ -393,6 +477,9 @@ class ContextoTarefa(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id_colaborador: int
+    id_empresa: int | None = Field(
+        default=None, description="Identificador da empresa (Guia A1 v0.7)."
+    )
     perfil: str = Field(
         default="colaborador",
         description="Perfil autenticado no A0 (colaborador, rh, gestor, tst, auditor).",
@@ -458,6 +545,10 @@ class SaidaMensagem(BaseModel):
     texto: str
     fontes: list[FonteCitada] = Field(default_factory=list)
     agendar_para: datetime | str | None = None
+    sensivel: bool = Field(
+        default=False,
+        description="Indica se a saída contém dado pessoal sensível (LGPD Art. 11 / Guia A1 v0.7).",
+    )
 
 
 class EventoEmitido(BaseModel):

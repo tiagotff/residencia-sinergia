@@ -27,25 +27,57 @@ class A1Config:
 
     groq_api_key: str = ""
     llm_model: str = "openai/gpt-oss-120b"
+    llm_timeout_segundos: float = 30.0
     database_url: str = "postgresql://sinergia:sinergia@localhost:5432/sinergia"
     politica_extrair_cid: bool = True
+    politica_cid_modo: str = "extrair_restrito"
     limiar_confianca_campo: float = 0.8
     prazo_entrega_fisica_dias_uteis: int = 2
     atestados_storage_dir: Path = Path(".storage/atestados")
+    max_arquivo_bytes: int = 10 * 1024 * 1024
+    max_paginas_pdf: int = 5
+
+    def __post_init__(self) -> None:
+        if self.llm_timeout_segundos <= 0:
+            raise ValueError("llm_timeout_segundos deve ser maior que zero.")
+        if self.max_arquivo_bytes <= 0:
+            raise ValueError("max_arquivo_bytes deve ser maior que zero.")
+        if self.max_paginas_pdf <= 0:
+            raise ValueError("max_paginas_pdf deve ser maior que zero.")
 
     @classmethod
     def from_env(cls) -> A1Config:
         """Instancia `A1Config` a partir das variáveis de ambiente atuais."""
+        politica_cid_env = (os.getenv("POLITICA_CID") or "").strip().lower()
+        if politica_cid_env in {"nao_extrair", "não_extrair"}:
+            politica_extrair_cid = False
+            politica_cid_modo = "nao_extrair"
+        elif politica_cid_env in {"extrair_restrito", "extrair"}:
+            politica_extrair_cid = True
+            politica_cid_modo = politica_cid_env
+        elif politica_cid_env:
+            raise ValueError(
+                f"POLITICA_CID inválida: {politica_cid_env!r}. "
+                "Valores aceitos: 'nao_extrair', 'extrair_restrito' ou 'extrair'."
+            )
+        else:
+            politica_extrair_cid = _str_to_bool(
+                os.getenv("POLITICA_EXTRAIR_CID"), padrao=True
+            )
+            politica_cid_modo = (
+                "extrair_restrito" if politica_extrair_cid else "nao_extrair"
+            )
+
         return cls(
             groq_api_key=os.getenv("GROQ_API_KEY", ""),
             llm_model=os.getenv("LLM_MODEL", "openai/gpt-oss-120b"),
+            llm_timeout_segundos=float(os.getenv("LLM_TIMEOUT_SEGUNDOS", "30")),
             database_url=os.getenv(
                 "DATABASE_URL",
                 "postgresql://sinergia:sinergia@localhost:5432/sinergia",
             ),
-            politica_extrair_cid=_str_to_bool(
-                os.getenv("POLITICA_EXTRAIR_CID"), padrao=True
-            ),
+            politica_extrair_cid=politica_extrair_cid,
+            politica_cid_modo=politica_cid_modo,
             limiar_confianca_campo=float(
                 os.getenv("LIMIAR_CONFIANCA_CAMPO", "0.8")
             ),
@@ -55,6 +87,10 @@ class A1Config:
             atestados_storage_dir=Path(
                 os.getenv("ATESTADOS_STORAGE_DIR", ".storage/atestados")
             ),
+            max_arquivo_bytes=int(
+                os.getenv("MAX_ARQUIVO_BYTES", str(10 * 1024 * 1024))
+            ),
+            max_paginas_pdf=int(os.getenv("MAX_PAGINAS_PDF", "5")),
         )
 
 

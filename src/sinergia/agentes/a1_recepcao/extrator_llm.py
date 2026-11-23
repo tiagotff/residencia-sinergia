@@ -17,6 +17,7 @@ Implementa a Task 1A.3 alinhada à ``Documentação - SinergIA v2.2.docx``
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Callable, Sequence
 from datetime import date, timedelta
 from functools import lru_cache
@@ -84,6 +85,10 @@ _RE_CID = re.compile(
 _RE_CONTATO = re.compile(
     r"(telefone|celular|whatsapp|e-?mail|@|\(\d{2}\)\s*\d{4,5}[-\s]?\d{4})",
     re.IGNORECASE,
+)
+_RE_MUNICIPIO_UF = re.compile(
+    r"(?:^|\n|,)\s*([A-ZÀ-Ú][A-Za-zÀ-ú\s]{2,40}?)\s*[-/]\s*"
+    r"(?:AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RO|RR|RS|SC|SP|SE|TO)\b"
 )
 
 
@@ -200,13 +205,39 @@ def _extrair_atestado_deterministico(mensagens: Any) -> AtestadoExtraido:
     if match_nome:
         nome_paciente = match_nome.group(1).strip()
 
+    texto_lower = texto_ocr.lower()
+    tipo_documento = (
+        "declaracao_comparecimento"
+        if ("declara" in texto_lower and "comparecimento" in texto_lower)
+        else "atestado_medico"
+    )
+
     municipio = None
-    if "campinas" in texto_ocr.lower():
-        municipio = "Campinas"
-    elif "são paulo" in texto_ocr.lower() or "sao paulo" in texto_ocr.lower():
-        municipio = "São Paulo"
+    for linha in texto_ocr.splitlines():
+        if re.search(r"\b(CRM|CRO|CRP)\b", linha, re.IGNORECASE):
+            continue
+        match_mun = _RE_MUNICIPIO_UF.search(linha)
+        if match_mun:
+            candidato = " ".join(match_mun.group(1).split()).strip(" -/,.")
+            if candidato and not re.match(r"^(?:dr|dra)\b", candidato, re.IGNORECASE):
+                municipio = candidato
+                break
+    if municipio:
+        sem_acento = "".join(
+            ch
+            for ch in unicodedata.normalize("NFKD", municipio)
+            if not unicodedata.combining(ch)
+        )
+        if sem_acento.lower() == "sao paulo":
+            municipio = "São Paulo"
+    if municipio is None:
+        if "campinas" in texto_lower:
+            municipio = "Campinas"
+        elif "são paulo" in texto_lower or "sao paulo" in texto_lower:
+            municipio = "São Paulo"
 
     return AtestadoExtraido(
+        tipo_documento=tipo_documento,
         legibilidade="ok",
         nome_no_documento=nome_paciente,
         periodo=PeriodoAfastamento(inicio=inicio, fim=fim),
@@ -344,12 +375,14 @@ def _criar_chat_groq_cacheado(
     modelo: str,
     api_key: str,
     temperature: float,
+    timeout: float,
 ) -> ChatGroq:
     """Cria e reutiliza o cliente `ChatGroq` uma única vez por configuração (Anexo C.2)."""
     return ChatGroq(
         model=modelo,
         api_key=api_key,
         temperature=temperature,
+        timeout=timeout,
         max_retries=6,
     )
 
@@ -360,17 +393,23 @@ def obter_cliente_llm(
     modelo: str | None = None,
     api_key: str | None = None,
     temperature: float = 0.0,
+    timeout: float | None = None,
 ) -> ChatGroq:
     """Retorna o cliente `ChatGroq` cacheado para o Agente A1."""
     cfg = config or obter_config_a1()
     modelo_final = (modelo or cfg.llm_model).strip()
     chave_final = (api_key if api_key is not None else cfg.groq_api_key).strip()
+    timeout_final = float(
+        cfg.llm_timeout_segundos if timeout is None else timeout
+    )
     if not chave_final:
         raise ValueError(
             "GROQ_API_KEY não configurada no ambiente/.env. "
             "Configure a chave ou injete um MockLLM para testes offline."
         )
-    return _criar_chat_groq_cacheado(modelo_final, chave_final, float(temperature))
+    return _criar_chat_groq_cacheado(
+        modelo_final, chave_final, float(temperature), timeout_final
+    )
 
 
 def _obter_nome_modelo(llm: Any, config: A1Config) -> str:
