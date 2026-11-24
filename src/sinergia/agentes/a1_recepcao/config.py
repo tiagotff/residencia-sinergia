@@ -36,6 +36,17 @@ class A1Config:
     atestados_storage_dir: Path = Path(".storage/atestados")
     max_arquivo_bytes: int = 10 * 1024 * 1024
     max_paginas_pdf: int = 5
+    who_icd_enabled: bool = True
+    who_icd_base_url: str = "https://id.who.int"
+    who_icd_token_url: str = "https://icdaccessmanagement.who.int/connect/token"
+    who_icd_client_id: str = ""
+    who_icd_client_secret: str = ""
+    who_icd_release_11: str = "2026-01"
+    who_icd_linearization: str = "mms"
+    who_icd_release_10: str = "2019"
+    who_icd_language: str = "pt"
+    who_icd_timeout_segundos: float = 10.0
+    who_icd_seed_url: str = "http://localhost:8088"
 
     def __post_init__(self) -> None:
         if self.llm_timeout_segundos <= 0:
@@ -44,6 +55,8 @@ class A1Config:
             raise ValueError("max_arquivo_bytes deve ser maior que zero.")
         if self.max_paginas_pdf <= 0:
             raise ValueError("max_paginas_pdf deve ser maior que zero.")
+        if self.who_icd_timeout_segundos <= 0:
+            raise ValueError("who_icd_timeout_segundos deve ser maior que zero.")
 
     @classmethod
     def from_env(cls) -> A1Config:
@@ -91,6 +104,28 @@ class A1Config:
                 os.getenv("MAX_ARQUIVO_BYTES", str(10 * 1024 * 1024))
             ),
             max_paginas_pdf=int(os.getenv("MAX_PAGINAS_PDF", "5")),
+            who_icd_enabled=_str_to_bool(
+                os.getenv("WHO_ICD_ENABLED"), padrao=True
+            ),
+            who_icd_base_url=os.getenv(
+                "WHO_ICD_BASE_URL", "https://id.who.int"
+            ).strip().rstrip("/"),
+            who_icd_token_url=os.getenv(
+                "WHO_ICD_TOKEN_URL",
+                "https://icdaccessmanagement.who.int/connect/token",
+            ).strip(),
+            who_icd_client_id=os.getenv("WHO_ICD_CLIENT_ID", "").strip(),
+            who_icd_client_secret=os.getenv("WHO_ICD_CLIENT_SECRET", "").strip(),
+            who_icd_release_11=os.getenv("WHO_ICD_RELEASE_11", "2026-01").strip(),
+            who_icd_linearization=os.getenv("WHO_ICD_LINEARIZATION", "mms").strip(),
+            who_icd_release_10=os.getenv("WHO_ICD_RELEASE_10", "2019").strip(),
+            who_icd_language=os.getenv("WHO_ICD_LANGUAGE", "pt").strip(),
+            who_icd_timeout_segundos=float(
+                os.getenv("WHO_ICD_TIMEOUT_SEGUNDOS", "10")
+            ),
+            who_icd_seed_url=os.getenv(
+                "WHO_ICD_SEED_URL", "http://localhost:8088"
+            ).strip().rstrip("/"),
         )
 
 

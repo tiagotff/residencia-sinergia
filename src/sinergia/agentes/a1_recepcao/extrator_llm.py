@@ -79,7 +79,7 @@ _RE_CONSELHO = re.compile(
     re.IGNORECASE,
 )
 _RE_CID = re.compile(
-    r"\bCID(?:-10)?\s*[:\-]?\s*([A-Z][A-Z0-9]{2}(?:\.[A-Z0-9]{1,2})?)\b",
+    r"\bCID(?:-1[01])?\s*[:\-]?\s*([1-9A-Z][A-Z0-9]{2,3}(?:\.[A-Z0-9]{1,2})?)\b",
     re.IGNORECASE,
 )
 _RE_CONTATO = re.compile(
@@ -190,11 +190,13 @@ def _extrair_atestado_deterministico(mensagens: Any) -> AtestadoExtraido:
             base = partes[0]
             if len(base) == 3:
                 base = base[0] + base[1:].replace("O", "0").replace("I", "1")
-            if len(partes) == 2:
-                decimal = partes[1].replace("O", "0").replace("I", "1")
-                cid = f"{base}.{decimal}"
+                if len(partes) == 2:
+                    decimal = partes[1].replace("O", "0").replace("I", "1")
+                    cid = f"{base}.{decimal}"
+                else:
+                    cid = base
             else:
-                cid = base
+                cid = f"{base}.{partes[1]}" if len(partes) == 2 else base
 
     nome_paciente = None
     match_nome = re.search(

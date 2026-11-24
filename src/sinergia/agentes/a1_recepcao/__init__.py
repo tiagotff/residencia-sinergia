@@ -2,6 +2,12 @@
 
 from sinergia.agentes.a1_recepcao.api import app as app_a1
 from sinergia.agentes.a1_recepcao.api import criar_app_a1
+from sinergia.agentes.a1_recepcao.cliente_cid_who import (
+    ClienteCidProtocol,
+    ClienteCidWHO,
+    DadosCidWHO,
+    ResultadoConsultaCidWHO,
+)
 from sinergia.agentes.a1_recepcao.config import A1Config, obter_config_a1
 from sinergia.agentes.a1_recepcao.extrator_llm import (
     MockLLM,
@@ -89,6 +95,8 @@ from sinergia.agentes.a1_recepcao.validador import (
     calcular_prazo_entrega_fisica,
     cid_sintaxe_valida,
     detectar_divergencias,
+    eh_cid10,
+    eh_cid11,
     gerar_mensagem_confirmacao_extracao,
     mesclar_atestado_confirmado,
     nomes_compativeis,
@@ -107,8 +115,11 @@ __all__ = [
     "AnaliseConversaA1",
     "AtestadoExtraido",
     "CampoMetadado",
+    "ClienteCidProtocol",
+    "ClienteCidWHO",
     "ContextoTarefa",
     "CorrelacaoEnvelope",
+    "DadosCidWHO",
     "DadosColaboradorCadastro",
     "DecisaoAgente",
     "DestinatarioSaida",
@@ -143,6 +154,7 @@ __all__ = [
     "RepositorioA1Postgres",
     "RepositorioA1Protocol",
     "ResultadoA1",
+    "ResultadoConsultaCidWHO",
     "ResultadoOCR",
     "ResultadoValidacaoConfirmacao",
     "SaidaMensagem",
@@ -164,6 +176,8 @@ __all__ = [
     "construir_prompt_usuario_extracao",
     "criar_app_a1",
     "detectar_divergencias",
+    "eh_cid10",
+    "eh_cid11",
     "executar",
     "exportar_json_schemas_a1",
     "extrair_atestado_via_llm",

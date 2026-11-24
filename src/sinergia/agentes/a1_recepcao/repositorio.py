@@ -227,6 +227,24 @@ class RepositorioA1Protocol(Protocol):
         self, codigo_cid: str | None, *, politica_extrair_cid: bool = True
     ) -> str | None: ...
 
+    def obter_cid(self, codigo_cid: str | None) -> dict[str, str] | None: ...
+
+    def salvar_cid(
+        self, codigo_cid: str, descricao: str, capitulo: str
+    ) -> str: ...
+
+    def salvar_cids_em_lote(
+        self, registros: Sequence[tuple[str, str, str]]
+    ) -> int: ...
+
+    def listar_cids(
+        self, filtro: str | None = None, *, limite: int = 200
+    ) -> list[dict[str, str]]: ...
+
+    def listar_atestados_recentes(
+        self, *, limite: int = 50
+    ) -> list[dict[str, Any]]: ...
+
     def resolver_id_usuario(
         self,
         identificador: int | str,
@@ -594,6 +612,148 @@ class RepositorioA1Postgres:
             cur.execute(sql, (codigo_norm,))
             row = cur.fetchone()
             return str(row["codigo_cid"]) if row is not None else None
+
+    def obter_cid(self, codigo_cid: str | None) -> dict[str, str] | None:
+        if not codigo_cid or not codigo_cid.strip():
+            return None
+        codigo_norm = codigo_cid.strip().upper()
+        sql = """
+            SELECT codigo_cid, descricao, capitulo
+            FROM afastamento.cid
+            WHERE UPPER(codigo_cid) = %s
+            LIMIT 1
+        """
+        with self._conectar() as conn, conn.cursor() as cur:
+            cur.execute(sql, (codigo_norm,))
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return {
+                "codigo_cid": str(row["codigo_cid"]),
+                "descricao": str(row["descricao"]),
+                "capitulo": str(row["capitulo"]),
+            }
+
+    def salvar_cid(self, codigo_cid: str, descricao: str, capitulo: str) -> str:
+        codigo_norm = codigo_cid.strip().upper()[:8]
+        if not codigo_norm:
+            raise ValueError("codigo_cid é obrigatório.")
+        desc_limpa = (" ".join(descricao.split()).strip() or f"CID {codigo_norm}")[:255]
+        cap_limpo = (capitulo.strip() or codigo_norm[:1])[:10]
+        sql = """
+            INSERT INTO afastamento.cid (codigo_cid, descricao, capitulo)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (codigo_cid) DO UPDATE
+            SET descricao = EXCLUDED.descricao,
+                capitulo = EXCLUDED.capitulo
+            RETURNING codigo_cid
+        """
+        with self._conectar() as conn, conn.cursor() as cur:
+            cur.execute(sql, (codigo_norm, desc_limpa, cap_limpo))
+            row = cur.fetchone()
+            conn.commit()
+            return str(row["codigo_cid"]) if row is not None else codigo_norm
+
+    def salvar_cids_em_lote(
+        self, registros: Sequence[tuple[str, str, str]]
+    ) -> int:
+        if not registros:
+            return 0
+        normalizados = []
+        for codigo, descricao, capitulo in registros:
+            codigo_norm = codigo.strip().upper()[:8]
+            if not codigo_norm:
+                continue
+            desc_limpa = (" ".join(descricao.split()).strip() or f"CID {codigo_norm}")[:255]
+            cap_limpo = (capitulo.strip() or codigo_norm[:1])[:10]
+            normalizados.append((codigo_norm, desc_limpa, cap_limpo))
+        if not normalizados:
+            return 0
+
+        sql = """
+            INSERT INTO afastamento.cid (codigo_cid, descricao, capitulo)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (codigo_cid) DO UPDATE
+            SET descricao = EXCLUDED.descricao,
+                capitulo = EXCLUDED.capitulo
+        """
+        with self._conectar() as conn, conn.cursor() as cur:
+            for idx in range(0, len(normalizados), 500):
+                cur.executemany(sql, normalizados[idx : idx + 500])
+            conn.commit()
+        return len(normalizados)
+
+    def listar_cids(
+        self, filtro: str | None = None, *, limite: int = 200
+    ) -> list[dict[str, str]]:
+        limite_seguro = max(1, min(int(limite), 5000))
+        with self._conectar() as conn, conn.cursor() as cur:
+            if filtro and filtro.strip():
+                termo = f"%{filtro.strip()}%"
+                cur.execute(
+                    """
+                    SELECT codigo_cid, descricao, capitulo
+                    FROM afastamento.cid
+                    WHERE codigo_cid ILIKE %s OR descricao ILIKE %s
+                    ORDER BY codigo_cid ASC
+                    LIMIT %s
+                    """,
+                    (termo, termo, limite_seguro),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT codigo_cid, descricao, capitulo
+                    FROM afastamento.cid
+                    ORDER BY codigo_cid ASC
+                    LIMIT %s
+                    """,
+                    (limite_seguro,),
+                )
+            return [
+                {
+                    "codigo_cid": str(r["codigo_cid"]),
+                    "descricao": str(r["descricao"]),
+                    "capitulo": str(r["capitulo"]),
+                }
+                for r in cur.fetchall()
+            ]
+
+    def listar_atestados_recentes(
+        self, *, limite: int = 50
+    ) -> list[dict[str, Any]]:
+        limite_seguro = max(1, min(int(limite), 500))
+        sql = """
+            SELECT a.id_atestado,
+                   a.id_caso,
+                   a.id_colaborador,
+                   c.nome AS colaborador_nome,
+                   a.tipo_documento,
+                   a.status,
+                   a.origem_dados,
+                   a.data_emissao,
+                   (a.inicio_afastamento AT TIME ZONE 'UTC')::date AS inicio,
+                   (a.fim_afastamento AT TIME ZONE 'UTC')::date AS fim,
+                   a.prazo_entrega_fisica,
+                   a.prazos_legais,
+                   cp.sigla AS conselho,
+                   ps.numero_registro AS registro_profissional,
+                   ps.sigla_uf AS uf_profissional,
+                   COALESCE(cr.codigo_cid, a.codigo_cid) AS codigo_cid_restrito,
+                   cid.descricao AS cid_descricao,
+                   a.postado_em
+            FROM afastamento.atestado a
+            JOIN cadastro.colaborador c ON c.id_colaborador = a.id_colaborador
+            JOIN afastamento.profissional_saude ps ON ps.id_profissional = a.id_profissional
+            JOIN afastamento.conselho_profissional cp ON cp.id_conselho = ps.id_conselho
+            LEFT JOIN afastamento.cid_restrito cr ON cr.id_atestado = a.id_atestado
+            LEFT JOIN afastamento.cid cid ON cid.codigo_cid = COALESCE(cr.codigo_cid, a.codigo_cid)
+            ORDER BY a.postado_em DESC, a.id_atestado DESC
+            LIMIT %s
+        """
+        with self._conectar() as conn, conn.cursor() as cur:
+            cur.execute(sql, (limite_seguro,))
+            return [dict(r) for r in cur.fetchall()]
 
     def _validar_perfil_usuario(
         self,
@@ -1415,6 +1575,94 @@ class RepositorioA1Memoria:
             return None
         codigo_norm = codigo_cid.strip().upper()
         return codigo_norm if codigo_norm in self.cids else None
+
+    def obter_cid(self, codigo_cid: str | None) -> dict[str, str] | None:
+        if not codigo_cid or not codigo_cid.strip():
+            return None
+        codigo_norm = codigo_cid.strip().upper()
+        descricao = self.cids.get(codigo_norm)
+        if descricao is None:
+            return None
+        return {
+            "codigo_cid": codigo_norm,
+            "descricao": descricao,
+            "capitulo": codigo_norm[:2] if len(codigo_norm) >= 4 and "." not in codigo_norm[:4] else codigo_norm[:1],
+        }
+
+    def salvar_cid(self, codigo_cid: str, descricao: str, capitulo: str) -> str:
+        codigo_norm = codigo_cid.strip().upper()[:8]
+        if not codigo_norm:
+            raise ValueError("codigo_cid é obrigatório.")
+        self.cids[codigo_norm] = (" ".join(descricao.split()).strip() or f"CID {codigo_norm}")[:255]
+        return codigo_norm
+
+    def salvar_cids_em_lote(
+        self, registros: Sequence[tuple[str, str, str]]
+    ) -> int:
+        total = 0
+        for codigo, descricao, capitulo in registros:
+            if codigo and codigo.strip():
+                self.salvar_cid(codigo, descricao, capitulo)
+                total += 1
+        return total
+
+    def listar_cids(
+        self, filtro: str | None = None, *, limite: int = 200
+    ) -> list[dict[str, str]]:
+        termo = filtro.strip().lower() if filtro and filtro.strip() else None
+        itens: list[dict[str, str]] = []
+        for codigo in sorted(self.cids.keys()):
+            desc = self.cids[codigo]
+            if termo and termo not in codigo.lower() and termo not in desc.lower():
+                continue
+            itens.append(
+                {
+                    "codigo_cid": codigo,
+                    "descricao": desc,
+                    "capitulo": codigo[:2] if len(codigo) >= 4 and "." not in codigo[:4] else codigo[:1],
+                }
+            )
+            if len(itens) >= limite:
+                break
+        return itens
+
+    def listar_atestados_recentes(
+        self, *, limite: int = 50
+    ) -> list[dict[str, Any]]:
+        ordenados = sorted(
+            self.atestados.values(),
+            key=lambda a: (a.postado_em, a.id_atestado),
+            reverse=True,
+        )[: max(1, int(limite))]
+        saida: list[dict[str, Any]] = []
+        for at in ordenados:
+            colab = self.colaboradores.get(at.id_colaborador)
+            prof = self.obter_profissional(at.id_profissional) or {}
+            cid_reg = self.cids_restritos.get(at.id_atestado)
+            cid_cod = cid_reg.codigo_cid if cid_reg is not None else at.codigo_cid
+            saida.append(
+                {
+                    "id_atestado": at.id_atestado,
+                    "id_caso": at.id_caso,
+                    "id_colaborador": at.id_colaborador,
+                    "colaborador_nome": colab.nome if colab else str(at.id_colaborador),
+                    "tipo_documento": at.tipo_documento,
+                    "status": at.status,
+                    "origem_dados": at.origem_dados,
+                    "data_emissao": at.data_emissao,
+                    "inicio": at.inicio_afastamento.date(),
+                    "fim": at.fim_afastamento.date(),
+                    "prazo_entrega_fisica": at.prazo_entrega_fisica,
+                    "prazos_legais": list(at.prazos_legais),
+                    "conselho": prof.get("conselho"),
+                    "registro_profissional": prof.get("numero"),
+                    "uf_profissional": prof.get("uf"),
+                    "codigo_cid_restrito": cid_cod,
+                    "cid_descricao": self.cids.get(cid_cod) if cid_cod else None,
+                    "postado_em": at.postado_em,
+                }
+            )
+        return saida
 
     def _validar_perfil_usuario(
         self,

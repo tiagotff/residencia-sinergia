@@ -69,6 +69,9 @@ CONSELHOS_ACEITOS_PADRAO: frozenset[str] = frozenset({"CRM", "CRO", "CRP"})
 
 _CONECTIVOS_NOME: frozenset[str] = frozenset({"de", "da", "do", "dos", "das", "e"})
 _PADRAO_CID10 = re.compile(r"^[A-Z]\d{2}(?:\.\d{1,2})?$")
+_PADRAO_CID11 = re.compile(
+    r"^[1-9A-HJ-NP-Z][A-HJ-NP-Z0-9]\d[A-HJ-NP-Z0-9](?:\.[A-HJ-NP-Z0-9]{1,2})?$"
+)
 
 
 def _normalizar_tokens_nome(nome: str | None) -> list[str]:
@@ -337,6 +340,11 @@ def gerar_mensagem_confirmacao_extracao(
                 f"O nome lido no documento foi '{div.no_documento}', diferente do "
                 f"seu cadastro ('{div.informado}'). Confirma se este atestado é seu?{sufixo_baixa_conf}"
             )
+        if div.campo == "cid":
+            return (
+                f"O código CID '{div.no_documento}' lido no documento não foi "
+                f"encontrado na tabela oficial CID. Pode conferir o código ou deixá-lo em branco?{sufixo_baixa_conf}"
+            )
 
     if divergencias:
         itens = "; ".join(
@@ -447,12 +455,25 @@ def calcular_marcos_legais(
     )
 
 
-def cid_sintaxe_valida(codigo_cid: str | None) -> bool:
-    """Valida o formato sintático de um código CID-10 (ex.: ``M54.5``, ``F41.1``)."""
+def eh_cid10(codigo_cid: str | None) -> bool:
+    """Verifica se o código segue o formato sintático CID-10 (ex.: ``M54.5``, ``J06.9``)."""
     if not codigo_cid:
         return False
     normalizado = codigo_cid.strip().upper()
     return len(normalizado) <= 8 and bool(_PADRAO_CID10.match(normalizado))
+
+
+def eh_cid11(codigo_cid: str | None) -> bool:
+    """Verifica se o código segue o formato sintático CID-11 (ex.: ``ME84.2``, ``1A00``, ``CA07.0``)."""
+    if not codigo_cid:
+        return False
+    normalizado = codigo_cid.strip().upper()
+    return len(normalizado) <= 8 and bool(_PADRAO_CID11.match(normalizado))
+
+
+def cid_sintaxe_valida(codigo_cid: str | None) -> bool:
+    """Valida o formato sintático de um código CID-11 ou CID-10."""
+    return eh_cid11(codigo_cid) or eh_cid10(codigo_cid)
 
 
 class ResultadoValidacaoConfirmacao(BaseModel):
@@ -479,6 +500,7 @@ def validar_dados_confirmados(
     conselhos_aceitos: Collection[str] = CONSELHOS_ACEITOS_PADRAO,
     exigir_profissional: bool = False,
     politica_extrair_cid: bool = True,
+    cid_existe_catalogo: bool | None = None,
     dias_uteis_entrega_fisica: int = 2,
     feriados: Collection[date] | None = None,
     dias_acumulados_60d: int = 0,
@@ -560,17 +582,29 @@ def validar_dados_confirmados(
                 erros_detalhe=erros_prof,
             )
 
-    if politica_extrair_cid and atestado.cid is not None and not cid_sintaxe_valida(atestado.cid):
-        return ResultadoValidacaoConfirmacao(
-            valido=False,
-            motivo="código CID inválido",
-            codigo_evento="cid_invalido",
-            mensagem_usuario=(
-                f"O código CID '{atestado.cid}' não está em um formato válido (ex.: M54.5). "
-                "Pode conferir ou deixá-lo em branco?"
-            ),
-            erros_detalhe=[f"CID fora do padrão CID-10: {atestado.cid!r}"],
-        )
+    if politica_extrair_cid and atestado.cid is not None:
+        if not cid_sintaxe_valida(atestado.cid):
+            return ResultadoValidacaoConfirmacao(
+                valido=False,
+                motivo="código CID inválido",
+                codigo_evento="cid_invalido",
+                mensagem_usuario=(
+                    f"O código CID '{atestado.cid}' não está em um formato válido "
+                    "(ex.: ME84.2 ou M54.5). Pode conferir ou deixá-lo em branco?"
+                ),
+                erros_detalhe=[f"CID fora do padrão CID-11/CID-10: {atestado.cid!r}"],
+            )
+        if cid_existe_catalogo is False:
+            return ResultadoValidacaoConfirmacao(
+                valido=False,
+                motivo="código CID não encontrado na tabela oficial CID",
+                codigo_evento="cid_invalido",
+                mensagem_usuario=(
+                    f"O código CID '{atestado.cid}' não foi encontrado na base local nem "
+                    "na API oficial da OMS. Pode conferir o código ou deixá-lo em branco?"
+                ),
+                erros_detalhe=[f"CID inexistente na base/API WHO: {atestado.cid!r}"],
+            )
 
     origem: OrigemDadosAtestado = (
         "MANUAL" if any(campo.strip() for campo in campos_corrigidos) else "IA"

@@ -24,6 +24,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from sinergia.agentes.a1_recepcao.cliente_cid_who import (
+    ClienteCidProtocol,
+    ClienteCidWHO,
+)
 from sinergia.agentes.a1_recepcao.config import A1Config, obter_config_a1
 from sinergia.agentes.a1_recepcao.extrator_llm import (
     analisar_conversa_atestado,
@@ -60,6 +64,7 @@ from sinergia.agentes.a1_recepcao.schemas import (
     TarefaA1,
 )
 from sinergia.agentes.a1_recepcao.validador import (
+    cid_sintaxe_valida,
     detectar_divergencias,
     gerar_mensagem_confirmacao_extracao,
     mesclar_atestado_confirmado,
@@ -125,7 +130,13 @@ def _sanitizar_mensagem_erro(texto: str) -> str:
     """Remove credenciais, tokens e excesso de detalhes de mensagens de erro."""
     sanitizado = re.sub(r"://[^/\s:@]+:[^/\s@]+@", "://***:***@", texto)
     sanitizado = re.sub(r"gsk_[A-Za-z0-9_-]+", "gsk_***", sanitizado)
-    sanitizado = re.sub(r"Bearer\s+\S+", "Bearer ***", sanitizado, flags=re.IGNORECASE)
+    sanitizado = re.sub(r"(?:Bearer|Basic)\s+\S+", "Bearer ***", sanitizado, flags=re.IGNORECASE)
+    sanitizado = re.sub(
+        r"(client_secret|WHO_ICD_CLIENT_SECRET)\s*[:=]\s*\S+",
+        r"\1=***",
+        sanitizado,
+        flags=re.IGNORECASE,
+    )
     return sanitizado[:300]
 
 
@@ -457,6 +468,7 @@ class ServicoA1:
         repositorio: RepositorioA1Protocol | None = None,
         llm: Any | None = None,
         config: A1Config | None = None,
+        cliente_cid: ClienteCidProtocol | None = None,
         cache_idempotencia: Any | None = None,
         extracoes_pendentes: dict[tuple[str | int, int, int | None], AtestadoExtraido]
         | None = None,
@@ -468,6 +480,14 @@ class ServicoA1:
             else _criar_repositorio_padrao(self.config.database_url.strip())
         )
         self.llm = llm
+        if cliente_cid is not None:
+            self.cliente_cid: ClienteCidProtocol | None = cliente_cid
+        elif self.config.who_icd_enabled:
+            candidato = ClienteCidWHO(config=self.config)
+            self.cliente_cid = candidato if candidato.credenciais_configuradas else None
+        else:
+            self.cliente_cid = None
+        self.ultimo_diagnostico_cid: dict[str, Any] | None = None
         self._cache_idempotencia: Any = (
             cache_idempotencia
             if cache_idempotencia is not None
@@ -476,6 +496,102 @@ class ServicoA1:
         self._extracoes_pendentes: dict[
             tuple[str | int, int, int | None], AtestadoExtraido
         ] = extracoes_pendentes if extracoes_pendentes is not None else {}
+
+    def _resolver_cid_com_fallback(
+        self, codigo_cid: str | None
+    ) -> tuple[str | None, bool | None]:
+        """Valida o CID primeiro em ``afastamento.cid``; se ausente, consulta a API externa WHO.
+
+        Retorna ``(codigo_normalizado_para_persistencia, existe_no_catalogo)``, onde
+        ``existe_no_catalogo`` pode ser ``True`` (encontrado no banco ou na API WHO),
+        ``False`` (sintaxe inválida ou 404 na API WHO) ou ``None`` (política desativada,
+        CID ausente ou API indisponível/não configurada — degradação graciosa).
+        """
+        self.ultimo_diagnostico_cid = None
+        if not self.config.politica_extrair_cid or not codigo_cid or not codigo_cid.strip():
+            return None, None
+
+        codigo_norm = codigo_cid.strip().upper()
+        if not cid_sintaxe_valida(codigo_norm):
+            self.ultimo_diagnostico_cid = {
+                "codigo_cid": codigo_norm,
+                "origem": "SINTAXE_INVALIDA",
+                "valido": False,
+                "descricao": None,
+            }
+            return None, False
+
+        # 1. Consulta local no banco de dados (afastamento.cid)
+        cid_local = self.repositorio.validar_cid(
+            codigo_norm, politica_extrair_cid=True
+        )
+        if cid_local is not None:
+            info_local = (
+                self.repositorio.obter_cid(cid_local)
+                if hasattr(self.repositorio, "obter_cid")
+                else None
+            )
+            self.ultimo_diagnostico_cid = {
+                "codigo_cid": cid_local,
+                "origem": "BANCO_LOCAL",
+                "valido": True,
+                "descricao": info_local.get("descricao") if info_local else None,
+                "capitulo": info_local.get("capitulo") if info_local else None,
+            }
+            return cid_local, True
+
+        # 2. Fallback na API externa da OMS (https://id.who.int) + cache-aside no banco
+        if self.cliente_cid is None:
+            self.ultimo_diagnostico_cid = {
+                "codigo_cid": codigo_norm,
+                "origem": "NAO_ENCONTRADO_SEM_API",
+                "valido": None,
+                "descricao": None,
+                "detalhe": "CID ausente no banco local e API WHO não configurada.",
+            }
+            return None, None
+
+        res_who = self.cliente_cid.consultar_cid(codigo_norm)
+        if res_who.status == "ENCONTRADO" and res_who.dados is not None:
+            dados = res_who.dados
+            codigo_salvo = dados.codigo_cid
+            if hasattr(self.repositorio, "salvar_cid"):
+                codigo_salvo = self.repositorio.salvar_cid(
+                    dados.codigo_cid, dados.descricao, dados.capitulo
+                )
+            self.ultimo_diagnostico_cid = {
+                "codigo_cid": codigo_salvo,
+                "origem": "API_WHO_EXTERNA_CACHE_ASIDE",
+                "valido": True,
+                "descricao": dados.descricao,
+                "capitulo": dados.capitulo,
+                "versao_cid": dados.versao_cid,
+            }
+            return codigo_salvo, True
+
+        if res_who.status == "NAO_ENCONTRADO":
+            self.ultimo_diagnostico_cid = {
+                "codigo_cid": codigo_norm,
+                "origem": "API_WHO_NAO_ENCONTRADO",
+                "valido": False,
+                "descricao": None,
+                "detalhe": res_who.detalhe,
+            }
+            return None, False
+
+        _LOGGER.warning(
+            "Fallback WHO ICD indisponível para %s: %s",
+            codigo_norm,
+            res_who.detalhe or "sem detalhes",
+        )
+        self.ultimo_diagnostico_cid = {
+            "codigo_cid": codigo_norm,
+            "origem": "API_WHO_INDISPONIVEL",
+            "valido": None,
+            "descricao": None,
+            "detalhe": res_who.detalhe,
+        }
+        return None, None
 
     def _identificador_repositorio(self) -> str | int:
         db_url = getattr(self.repositorio, "_database_url", None)
@@ -654,6 +770,15 @@ class ServicoA1:
             return resultado, False
 
         divergencias = detectar_divergencias(extraido, tarefa.registro_inicial)
+        cid_valido, cid_existe = self._resolver_cid_com_fallback(extraido.cid)
+        if cid_existe is False and extraido.cid:
+            divergencias.append(
+                DivergenciaCampo(
+                    campo="cid",
+                    no_documento=extraido.cid,
+                    informado="não encontrado na base local nem na API oficial da OMS",
+                )
+            )
         self._guardar_extracao_pendente(tarefa, extraido)
 
         inicio = extraido.periodo.inicio
@@ -692,9 +817,6 @@ class ServicoA1:
                 extraido.municipio,
                 uf_busca,
                 id_colaborador_fallback=id_colaborador,
-            )
-            cid_valido = self.repositorio.validar_cid(
-                extraido.cid, politica_extrair_cid=self.config.politica_extrair_cid
             )
             if id_prof is not None and id_municipio is not None:
                 reg_pendente = self.repositorio.salvar_atestado_pendente(
@@ -797,12 +919,15 @@ class ServicoA1:
             else ()
         ) or ("CRM", "CRO", "CRP")
 
+        cid_valido, cid_existe = self._resolver_cid_com_fallback(mesclado.cid)
+
         validacao = validar_dados_confirmados(
             mesclado,
             payload.campos_corrigidos,
             colaborador_ativo=colaborador_ativo,
             conselhos_aceitos=conselhos_aceitos,
             politica_extrair_cid=self.config.politica_extrair_cid,
+            cid_existe_catalogo=cid_existe,
             dias_uteis_entrega_fisica=self.config.prazo_entrega_fisica_dias_uteis,
             dias_acumulados_60d=dias_acumulados,
         )
@@ -886,9 +1011,6 @@ class ServicoA1:
             )
             if (mesclado.municipio is not None or pendente_db is None)
             else pendente_db.id_municipio
-        )
-        cid_valido = self.repositorio.validar_cid(
-            mesclado.cid, politica_extrair_cid=self.config.politica_extrair_cid
         )
 
         prazos_legais = (
@@ -1124,6 +1246,7 @@ class AgenteA1(ServicoA1):
         repositorio: RepositorioA1Protocol | None = None,
         llm: Any | None = None,
         config: A1Config | None = None,
+        cliente_cid: ClienteCidProtocol | None = None,
         cache_idempotencia: Any | None = None,
         extracoes_pendentes: dict[tuple[str | int, int, int | None], AtestadoExtraido]
         | None = None,
@@ -1143,6 +1266,7 @@ class AgenteA1(ServicoA1):
             repositorio=repo_final,
             llm=llm,
             config=cfg,
+            cliente_cid=cliente_cid,
             cache_idempotencia=cache_idempotencia,
             extracoes_pendentes=extracoes_pendentes,
         )
@@ -1154,12 +1278,14 @@ def executar(
     repositorio: RepositorioA1Protocol | None = None,
     llm: Any | None = None,
     config: A1Config | None = None,
+    cliente_cid: ClienteCidProtocol | None = None,
 ) -> dict[str, Any]:
     """Ponto de entrada único do Agente 1 no protocolo ``sinergia/1``."""
     servico = ServicoA1(
         repositorio=repositorio,
         llm=llm,
         config=config,
+        cliente_cid=cliente_cid,
         cache_idempotencia=_CACHE_IDEMPOTENCIA_MODULO,
         extracoes_pendentes=_EXTRACOES_PENDENTES_MODULO,
     )

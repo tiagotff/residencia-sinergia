@@ -75,8 +75,8 @@ Sua única tarefa é ler o texto bruto obtido via OCR (ou camada textual de PDF)
 """
 
 _BLOCO_CID_ATIVO = (
-    "   - Política **ATIVA** (`POLITICA_EXTRAIR_CID=true`): extraia o código CID-10 em maiúsculas "
-    '(ex.: `"J06.9"`, `"M54.5"`) **somente** se constar de forma explícita e legível no documento. '
+    "   - Política **ATIVA** (`POLITICA_EXTRAIR_CID=true`): extraia o código CID-11 ou CID-10 em maiúsculas "
+    '(ex.: `"ME84.2"`, `"CA07.0"`, `"J06.9"`, `"M54.5"`) **somente** se constar de forma explícita e legível no documento. '
     "Nunca infira o CID a partir de sintomas ou texto livre; se não estiver explícito, retorne `null`."
 )
 
