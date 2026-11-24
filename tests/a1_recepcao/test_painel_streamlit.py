@@ -31,6 +31,7 @@ from sinergia.agentes.a1_recepcao.painel import (
     montar_tarefa_confirmar,
     montar_tarefa_conversar,
     montar_tarefa_processar_documento,
+    resumir_diff_edicao,
     salvar_upload_temporario,
     verificar_catalogo_sintetico,
     verificar_variaveis_env,
@@ -113,6 +114,9 @@ def test_cliente_conexao_in_process_http_a1_e_inspetor_lgpd() -> None:
     assert tr_doc.resultado["estado_proposto"] == "RECEBIDO"
     caso = aplicar_resultado_ao_caso(caso, tr_doc)
     assert caso.aguardando_hitl is True
+    assert caso.ultima_revisao_colaborador is not None
+    assert "resumo_markdown" in caso.ultima_revisao_colaborador
+    assert len(caso.ultima_revisao_colaborador["itens"]) >= 10
 
     # Replay idempotente da mesma id_mensagem
     tr_doc_replay = cliente_inproc.enviar_tarefa(t_doc, eh_replay=True)
@@ -220,12 +224,26 @@ def test_emulador_a0_multi_caso_uploads_e_campos_corrigidos(tmp_path: Path) -> N
     editado = {
         **extraido,
         "periodo": {"inicio": "2026-11-09", "fim": "2026-11-12"},
-        "profissional": {"conselho": "CRM", "numero": "654321", "uf": "SP"},
+        "profissional": {
+            "conselho": "CRM",
+            "numero": "654321",
+            "uf": "SP",
+            "nome": "Dra. Helena Costa",
+        },
     }
     assert calcular_campos_corrigidos(extraido, editado) == [
         "periodo.fim",
         "profissional.numero",
+        "profissional.nome",
     ]
+    diffs_resumo = resumir_diff_edicao(extraido, editado)
+    assert [d["campo"] for d in diffs_resumo] == [
+        "periodo.fim",
+        "profissional.numero",
+        "profissional.nome",
+    ]
+    assert diffs_resumo[1]["antes_ia"] == "123456"
+    assert diffs_resumo[1]["depois_manual"] == "654321"
     assert len(carregar_fixtures_oficiais()) == 5
 
     caso_106 = criar_caso_padrao(106, inicio_informado=date(2026, 11, 16), dias_informados=2)
@@ -235,7 +253,7 @@ def test_emulador_a0_multi_caso_uploads_e_campos_corrigidos(tmp_path: Path) -> N
 def test_apptest_renderizacao_e_fluxo_basico_streamlit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Executa o app Streamlit via AppTest (offline) cobrindo fluxo completo HITL."""
+    """Executa o app Streamlit via AppTest cobrindo espelho HITL, edição guiada e modos."""
     monkeypatch.setenv("GROQ_API_KEY", "")
     monkeypatch.setenv("POLITICA_CID", "nao_extrair")
 
@@ -249,20 +267,44 @@ def test_apptest_renderizacao_e_fluxo_basico_streamlit(
     assert not at.exception
     assert any("Pode me enviar uma foto" in md.value for md in at.markdown)
 
-    # 2. Processa documento canônico da Carla (gera pausa humana HITL)
+    # 2. Processa documento canônico da Carla -> exibe Espelho de Validação + alerta divergência
     at.button(key="btn_proc_105").click().run()
     assert not at.exception
-    assert len(at.warning) >= 1  # divergência de dias detectada
+    assert len(at.warning) >= 1
+    assert any("O que o Agente A1 leu no documento" in md.value for md in at.markdown)
+    assert any("Dados lidos no documento" in md.value for md in at.markdown)
 
-    # 3. Confirma no formulário HITL
+    # 3. Confirma em 1 clique no Espelho (origem IA)
     at.button(key="btn_conf_105").click().run()
     assert not at.exception
+    assert at.session_state["painel_casos"][105].estado_atual == "VALIDADO"
 
-    # 4. Testa replay idempotente
-    at.button(key="btn_replay_105").click().run()
+    # 4. Cria Caso 106, processa e testa edição guiada (origem MANUAL)
+    at.button(key="sim_btn_novo_caso").click().run()
+    assert not at.exception
+    assert at.session_state["painel_id_caso_ativo"] == 106
+
+    at.button(key="btn_proc_106").click().run()
+    assert not at.exception
+    at.toggle(key="toggle_editar_106").set_value(True).run()
+    assert not at.exception
+    at.text_input(key="hitl_num_106").set_value("654321").run()
+    at.button(key="btn_conf_editado_106").click().run()
+    assert not at.exception
+    caso_106 = at.session_state["painel_casos"][106]
+    assert caso_106.estado_atual == "VALIDADO"
+    assert caso_106.trocas[-1].resultado["payload"]["origem"] == "MANUAL"
+
+    # 5. Alterna para Modo Apresentação sem erros
+    at.radio(key="painel_modo_visao").set_value("apresentacao").run()
+    assert not at.exception
+    at.radio(key="painel_modo_visao").set_value("engenharia").run()
+    assert not at.exception
+
+    # 6. Testa replay idempotente e diagnóstico pré-voo
+    at.button(key="btn_replay_106").click().run()
     assert not at.exception
     assert any("Idempotência 100% íntegra" in s.value for s in at.success)
 
-    # 5. Executa diagnóstico pré-voo
     at.button(key="diag_btn_run").click().run()
     assert not at.exception

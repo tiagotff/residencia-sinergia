@@ -64,7 +64,9 @@ Sua única tarefa é ler o texto bruto obtido via OCR (ou camada textual de PDF)
 9. **`confianca_campos`:**
    - Informe um mapa com a confiança estimada entre `0.0` e `1.0` para cada campo analisado:
      `"nome_no_documento"`, `"periodo.inicio"`, `"periodo.fim"`, `"data_emissao"`,
-     `"profissional.conselho"`, `"profissional.numero"`, `"profissional.uf"`, `"cid"`, `"municipio"`.
+     `"profissional.conselho"`, `"profissional.numero"`, `"profissional.uf"`, `"profissional.nome"`,
+     `"cid"`, `"municipio"`.
+   - Preencha fielmente **todos os campos legíveis** do documento para que sejam apresentados ao colaborador em um espelho de conferência direta e passíveis de validação ou correção antes do registro final.
 
 ### Guardrails Inegociáveis (Seção 5.3, Anexo E.2 e LGPD Art. 11)
 

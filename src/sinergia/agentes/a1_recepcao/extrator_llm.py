@@ -175,13 +175,23 @@ def _extrair_atestado_deterministico(mensagens: Any) -> AtestadoExtraido:
         else:
             data_emissao = datas[-1] if datas else inicio
 
-    conselho = numero = uf = None
+    conselho = numero = uf = nome_prof = None
     match_prof = _RE_CONSELHO.search(texto_ocr)
     if match_prof:
         conselho = match_prof.group(1).upper()
         uf_antes, numero, uf_depois = match_prof.group(2), match_prof.group(3), match_prof.group(4)
         uf_bruta = uf_antes or uf_depois
         uf = uf_bruta.upper() if uf_bruta else None
+
+    match_prof_nome = re.search(
+        r"\b(Dr\.?|Dra\.?)\s+([A-ZÀ-Ú][a-zà-ú]+(?:\s+(?:da|de|do|das|dos|[A-ZÀ-Ú][a-zà-ú]+))+)"
+        r"(?=\s*[-–\n,]|\s+(?:CRM|CRO|CRP)\b|$)",
+        texto_ocr,
+    )
+    if match_prof_nome:
+        prefixo = match_prof_nome.group(1).rstrip(".")
+        sobrenomes = " ".join(match_prof_nome.group(2).split())
+        nome_prof = f"{prefixo}. {sobrenomes}"
 
     cid = None
     if extrair_cid:
@@ -248,6 +258,7 @@ def _extrair_atestado_deterministico(mensagens: Any) -> AtestadoExtraido:
             conselho=conselho,
             numero=numero,
             uf=uf,
+            nome=nome_prof,
         ),
         cid=cid,
         municipio=municipio,
@@ -259,6 +270,7 @@ def _extrair_atestado_deterministico(mensagens: Any) -> AtestadoExtraido:
             "profissional.conselho": 0.97 if conselho else 0.0,
             "profissional.numero": 0.97 if numero else 0.0,
             "profissional.uf": 0.97 if uf else 0.0,
+            **({"profissional.nome": 0.95} if nome_prof else {}),
             "cid": 0.95 if cid else 1.0,
             "municipio": 0.94 if municipio else 0.0,
         },

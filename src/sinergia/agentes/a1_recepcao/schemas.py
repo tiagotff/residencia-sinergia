@@ -53,6 +53,9 @@ LegibilidadeDocumento = Literal["ok", "ilegivel"]
 TipoDocumentoAfastamento = Literal[
     "atestado_medico", "declaracao_comparecimento", "outro"
 ]
+StatusRevisaoCampo = Literal[
+    "lido_ok", "divergente", "baixa_confianca", "nao_identificado"
+]
 
 
 # ============================================================================
@@ -286,6 +289,8 @@ class AtestadoExtraido(BaseModel):
                 copia.profissional.numero = None
             if _checar_e_zerar("profissional.uf", "uf"):
                 copia.profissional.uf = None
+            if _checar_e_zerar("profissional.nome"):
+                copia.profissional.nome = None
             if extrair_cid and copia.cid is not None and _checar_e_zerar("cid"):
                 copia.cid = None
             if _checar_e_zerar("municipio"):
@@ -303,6 +308,63 @@ class AtestadoExtraido(BaseModel):
             copia.periodo.dias = None
 
         return copia
+
+
+class ItemRevisaoCampo(BaseModel):
+    """Campo individual exibido no espelho de revisão e validação do colaborador."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    campo: str = Field(..., description="Chave canônica do campo (ex.: 'periodo.inicio').")
+    rotulo: str = Field(..., description="Rótulo legível em português para o colaborador.")
+    valor_lido: Any = Field(
+        default=None, description="Valor canônico extraído do documento (ou None)."
+    )
+    valor_exibicao: str = Field(
+        ..., description="Representação amigável em PT-BR para visualização rápida."
+    )
+    valor_informado_antes: Any = Field(
+        default=None,
+        description="Valor informado no registro_inicial quando houver divergência.",
+    )
+    confianca: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Confiança estimada da leitura pela IA (0.0 a 1.0).",
+    )
+    status: StatusRevisaoCampo = Field(
+        ..., description="Situação da leitura para destaque visual ao colaborador."
+    )
+    editavel: bool = Field(
+        default=True, description="Indica se o colaborador pode alterar este campo."
+    )
+    obrigatorio: bool = Field(
+        default=False, description="Indica se o campo é obrigatório para confirmar."
+    )
+
+
+class QuadroRevisaoAtestado(BaseModel):
+    """Espelho completo dos dados lidos pelo LLM para validação/correção humana."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    titulo: str = Field(..., description="Cabeçalho curto da solicitação de revisão.")
+    instrucao_colaborador: str = Field(
+        ...,
+        description="Orientação objetiva convidando o colaborador a confirmar ou editar.",
+    )
+    legibilidade: LegibilidadeDocumento
+    resumo_markdown: str = Field(
+        ..., description="Resumo legível em Markdown com todos os dados lidos no documento."
+    )
+    itens: list[ItemRevisaoCampo] = Field(
+        default_factory=list,
+        description="Lista ordenada de campos para renderização visual no frontend.",
+    )
+    permite_confirmar_direto: bool = True
+    permite_editar: bool = True
+    requer_novo_arquivo: bool = False
 
 
 class DivergenciaCampo(BaseModel):
@@ -373,6 +435,7 @@ class PayloadProcessarDocumentoResultado(BaseModel):
 
     atestado_extraido: AtestadoExtraido
     divergencias: list[DivergenciaCampo] = Field(default_factory=list)
+    revisao_colaborador: QuadroRevisaoAtestado | None = None
 
 
 # --- Ação 3: a1.confirmar ---
@@ -739,6 +802,7 @@ def exportar_json_schemas_a1() -> dict[str, dict[str, Any]]:
         "TarefaA1": TarefaA1.model_json_schema(),
         "ResultadoA1": ResultadoA1.model_json_schema(),
         "AtestadoExtraido": AtestadoExtraido.model_json_schema(),
+        "QuadroRevisaoAtestado": QuadroRevisaoAtestado.model_json_schema(),
         "a1.conversar.tarefa": PayloadConversarTarefa.model_json_schema(),
         "a1.conversar.resultado": PayloadConversarResultado.model_json_schema(),
         "a1.processar_documento.tarefa": PayloadProcessarDocumentoTarefa.model_json_schema(),

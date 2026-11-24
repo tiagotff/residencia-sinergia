@@ -60,6 +60,7 @@ from sinergia.agentes.a1_recepcao.schemas import (
     TarefaA1,
 )
 from sinergia.agentes.a1_recepcao.validador import (
+    construir_quadro_revisao_atestado,
     detectar_divergencias,
     gerar_mensagem_confirmacao_extracao,
     mesclar_atestado_confirmado,
@@ -566,30 +567,33 @@ class ServicoA1:
     def _resposta_duplicada(
         self, tarefa: TarefaA1, duplicado: RegistroAtestadoDB
     ) -> ResultadoA1:
-        atestado_dup = AtestadoExtraido(
-            legibilidade="ok",
-            periodo=PeriodoAfastamento(
-                inicio=duplicado.inicio_afastamento.date(),
-                fim=duplicado.fim_afastamento.date(),
-            ),
-            data_emissao=duplicado.data_emissao,
-            cid=duplicado.codigo_cid,
+        atestado_dup = _reconstruir_base_de_pendente(
+            duplicado, repositorio=self.repositorio
         )
+        quadro_dup = construir_quadro_revisao_atestado(
+            atestado_dup,
+            [],
+            politica_extrair_cid=self.config.politica_extrair_cid,
+        )
+        payload_dup = {
+            "atestado_extraido": _formatar_atestado_payload(atestado_dup),
+            "divergencias": [],
+            "revisao_colaborador": quadro_dup.model_dump(mode="json"),
+        }
+        PayloadProcessarDocumentoResultado.model_validate(payload_dup)
         return ResultadoA1.a_partir_da_tarefa(
             tarefa,
             status="PRECISA_HUMANO",
             estado_proposto="RECEBIDO",
-            payload={
-                "atestado_extraido": _formatar_atestado_payload(atestado_dup),
-                "divergencias": [],
-            },
+            payload=payload_dup,
             saidas=[
                 SaidaMensagem(
                     tipo="mensagem",
                     texto=(
                         "Este arquivo de atestado já foi recebido anteriormente "
                         f"(registro #{duplicado.id_atestado}). Deseja confirmar "
-                        "os dados ou enviar outro documento?"
+                        "os dados ou enviar outro documento?\n\n"
+                        f"{quadro_dup.resumo_markdown}"
                     ),
                 )
             ],
@@ -634,18 +638,30 @@ class ServicoA1:
         )
 
         if extraido.legibilidade == "ilegivel":
+            quadro_ilegivel = construir_quadro_revisao_atestado(
+                extraido,
+                [],
+                politica_extrair_cid=self.config.politica_extrair_cid,
+            )
+            payload_ileg = {
+                "atestado_extraido": _formatar_atestado_payload(extraido),
+                "divergencias": [],
+                "revisao_colaborador": quadro_ilegivel.model_dump(mode="json"),
+            }
+            PayloadProcessarDocumentoResultado.model_validate(payload_ileg)
             resultado = ResultadoA1.a_partir_da_tarefa(
                 tarefa,
                 status="PRECISA_HUMANO",
                 estado_proposto="NOVO",
-                payload={
-                    "atestado_extraido": _formatar_atestado_payload(extraido),
-                    "divergencias": [],
-                },
+                payload=payload_ileg,
                 saidas=[
                     SaidaMensagem(
                         tipo="mensagem",
-                        texto=gerar_mensagem_confirmacao_extracao(extraido, []),
+                        texto=gerar_mensagem_confirmacao_extracao(
+                            extraido,
+                            [],
+                            politica_extrair_cid=self.config.politica_extrair_cid,
+                        ),
                     )
                 ],
                 eventos=[],
@@ -731,9 +747,15 @@ class ServicoA1:
             )
         decisao_final = decisao.model_copy(update={"motivo": motivo_decisao})
 
+        quadro_revisao = construir_quadro_revisao_atestado(
+            extraido,
+            divergencias,
+            politica_extrair_cid=self.config.politica_extrair_cid,
+        )
         payload_dict = {
             "atestado_extraido": _formatar_atestado_payload(extraido),
             "divergencias": [d.model_dump(mode="json") for d in divergencias],
+            "revisao_colaborador": quadro_revisao.model_dump(mode="json"),
         }
         PayloadProcessarDocumentoResultado.model_validate(payload_dict)
 
@@ -749,7 +771,11 @@ class ServicoA1:
             saidas=[
                 SaidaMensagem(
                     tipo="mensagem",
-                    texto=gerar_mensagem_confirmacao_extracao(extraido, divergencias),
+                    texto=gerar_mensagem_confirmacao_extracao(
+                        extraido,
+                        divergencias,
+                        politica_extrair_cid=self.config.politica_extrair_cid,
+                    ),
                 )
             ],
             eventos=[EventoEmitido(tipo="atestado.extraido", dados=dados_evento)],

@@ -123,6 +123,25 @@ def _construir_resultado_erro_transporte(
     }
 
 
+def _executar_post_http(
+    cliente: Any | None,
+    destino: str,
+    *,
+    json_body: dict[str, Any],
+    headers: dict[str, str] | None = None,
+    timeout: float,
+) -> Any:
+    """Executa POST HTTP via `httpx` ou cliente injetado sem acionar deprecation do `TestClient`."""
+    kwargs: dict[str, Any] = {"json": json_body}
+    if headers:
+        kwargs["headers"] = headers
+    if cliente is not None:
+        if type(cliente).__name__ != "TestClient":
+            kwargs["timeout"] = timeout
+        return cliente.post(destino, **kwargs)
+    return httpx.post(destino, **kwargs, timeout=timeout)
+
+
 class ClienteConexaoA0A1:
     """Abstrai a execução do A1 em memória/processo, HTTP FastAPI A1 ou API do A0."""
 
@@ -180,10 +199,11 @@ class ClienteConexaoA0A1:
         destino = f"{base}/executar" if base else "/executar"
         timeout = max(float(self.config.llm_timeout_segundos) + 10.0, 30.0)
         try:
-            resp = (
-                self._http_client.post(destino, json=tarefa, timeout=timeout)
-                if self._http_client is not None
-                else httpx.post(destino, json=tarefa, timeout=timeout)
+            resp = _executar_post_http(
+                self._http_client,
+                destino,
+                json_body=tarefa,
+                timeout=timeout,
             )
             if resp.status_code != 200:
                 return _construir_resultado_erro_transporte(
@@ -290,10 +310,12 @@ class ClienteConexaoA0A1:
         timeout = max(float(self.config.llm_timeout_segundos) + 10.0, 30.0)
         inicio = time.perf_counter()
         try:
-            resp = (
-                self._http_client.post(destino, json=corpo, headers=headers, timeout=timeout)
-                if self._http_client is not None
-                else httpx.post(destino, json=corpo, headers=headers, timeout=timeout)
+            resp = _executar_post_http(
+                self._http_client,
+                destino,
+                json_body=corpo,
+                headers=headers or None,
+                timeout=timeout,
             )
             latencia_ms = round((time.perf_counter() - inicio) * 1000, 2)
             try:

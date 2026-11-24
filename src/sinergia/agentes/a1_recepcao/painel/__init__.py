@@ -27,6 +27,7 @@ from sinergia.agentes.a1_recepcao.painel.emulador_a0 import (
     montar_tarefa_confirmar,
     montar_tarefa_conversar,
     montar_tarefa_processar_documento,
+    resumir_diff_edicao,
     salvar_upload_temporario,
 )
 
@@ -47,6 +48,7 @@ __all__ = [
     "montar_tarefa_confirmar",
     "montar_tarefa_conversar",
     "montar_tarefa_processar_documento",
+    "resumir_diff_edicao",
     "salvar_upload_temporario",
     "validar_envelope_sinergia",
     "verificar_catalogo_sintetico",

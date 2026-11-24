@@ -21,12 +21,14 @@ from sinergia.agentes.a1_recepcao import (
     A1Config,
     AgenteA1,
     AtestadoExtraido,
+    DivergenciaCampo,
     MockLLM,
     PeriodoAfastamento,
     ProfissionalExtraido,
     RepositorioA1Memoria,
     RepositorioA1Postgres,
     ResultadoA1,
+    construir_quadro_revisao_atestado,
     criar_app_a1,
     executar_modelo,
     exportar_json_schemas_a1,
@@ -1155,3 +1157,105 @@ def test_politica_cid_nao_extrair_e_sigilo_nao_sinalizam_baixa_confianca_cid() -
     assert "cid" in aplicado_baixa.campos
     assert aplicado_baixa.campos["cid"].vazio_por_baixa_confianca is True
     assert aplicado_baixa.campos["cid"].confianca == 0.50
+
+
+def test_quadro_revisao_atestado_e_reconstrucao_duplicado() -> None:
+    """Valida o espelho de revisão em cenários OK, divergente, baixa confiança, ilegível e duplicado."""
+    base = AtestadoExtraido(
+        tipo_documento="atestado_medico",
+        legibilidade="ok",
+        nome_no_documento="Carla Souza",
+        periodo=PeriodoAfastamento(inicio=date(2026, 11, 9), fim=date(2026, 11, 11)),
+        data_emissao=date(2026, 11, 9),
+        profissional=ProfissionalExtraido(
+            conselho="CRM", numero="123456", uf="SP", nome="Dr. Marcos Lima"
+        ),
+        cid="J06.9",
+        municipio="Campinas",
+        confianca_campos={
+            "nome_no_documento": 0.96,
+            "periodo.inicio": 0.96,
+            "periodo.fim": 0.95,
+            "data_emissao": 0.95,
+            "profissional.conselho": 0.97,
+            "profissional.numero": 0.97,
+            "profissional.uf": 0.97,
+            "profissional.nome": 0.95,
+            "cid": 0.94,
+            "municipio": 0.94,
+        },
+    )
+
+    # 1. Leitura completa OK com CID habilitado
+    q_ok = construir_quadro_revisao_atestado(base, [], politica_extrair_cid=True)
+    assert q_ok.permite_confirmar_direto is True
+    assert q_ok.permite_editar is True
+    assert q_ok.requer_novo_arquivo is False
+    assert "CID-10:** J06.9" in q_ok.resumo_markdown
+    assert all(it.status == "lido_ok" for it in q_ok.itens)
+
+    # 2. Divergências em dias e início
+    q_div = construir_quadro_revisao_atestado(
+        base,
+        [
+            DivergenciaCampo(campo="dias", no_documento=3, informado=5),
+            DivergenciaCampo(
+                campo="inicio", no_documento="2026-11-09", informado="2026-11-10"
+            ),
+        ],
+        politica_extrair_cid=False,
+    )
+    por_campo = {it.campo: it for it in q_div.itens}
+    assert por_campo["periodo.dias"].status == "divergente"
+    assert por_campo["periodo.dias"].valor_informado_antes == 5
+    assert por_campo["periodo.inicio"].status == "divergente"
+    assert por_campo["periodo.inicio"].valor_informado_antes == "2026-11-10"
+    assert "divergências" in q_div.titulo
+
+    # 3. Baixa confiança em profissional.numero + política CID desativada (LGPD)
+    sem_cid_baixa = base.model_copy(
+        update={
+            "confianca_campos": {
+                **(base.confianca_campos or {}),
+                "profissional.numero": 0.41,
+            }
+        }
+    ).aplicar_politica_e_limiar(extrair_cid=False, limiar_confianca=0.8)
+    q_baixa = construir_quadro_revisao_atestado(
+        sem_cid_baixa, [], politica_extrair_cid=False
+    )
+    itens_baixa = {it.campo: it for it in q_baixa.itens}
+    assert itens_baixa["profissional.numero"].status == "baixa_confianca"
+    assert "cid" not in itens_baixa
+    assert "CID-10" not in q_baixa.resumo_markdown
+
+    # 4. Ilegível bloqueia confirmação direta
+    q_ileg = construir_quadro_revisao_atestado(
+        AtestadoExtraido(legibilidade="ilegivel"), [], politica_extrair_cid=False
+    )
+    assert q_ileg.permite_confirmar_direto is False
+    assert q_ileg.permite_editar is False
+    assert q_ileg.requer_novo_arquivo is True
+    assert "ilegível" in q_ileg.resumo_markdown
+
+    # 5. Arquivo duplicado reconstrói atestado completo e devolve revisao_colaborador
+    repo = RepositorioA1Memoria()
+    agente = AgenteA1(
+        db=repo,
+        llm=MockLLM(),
+        config=A1Config(groq_api_key="", politica_extrair_cid=False),
+    )
+    t1 = copy.deepcopy(
+        _carregar_fixture("a1.processar_documento/carla_divergencia_dias.tarefa.json")
+    )
+    t1["id_mensagem"] = "rev-dup-01"
+    agente.executar(t1)
+
+    t2 = copy.deepcopy(t1)
+    t2["id_mensagem"] = "rev-dup-02"
+    r2 = agente.executar(t2)
+    ResultadoA1.model_validate(r2).validar_payload_acao()
+    assert r2["payload"]["atestado_extraido"]["nome_no_documento"] == "Carla Souza"
+    assert r2["payload"]["atestado_extraido"]["profissional"]["numero"] == "123456"
+    assert r2["payload"]["revisao_colaborador"]["legibilidade"] == "ok"
+    assert "Dados lidos no documento" in r2["saidas"][0]["texto"]

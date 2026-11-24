@@ -56,6 +56,7 @@ class EstadoCasoSimulado(BaseModel):
     tem_documento: bool = False
     ultimo_arquivo_uri: str | None = None
     ultimo_atestado_extraido: dict[str, Any] | None = None
+    ultima_revisao_colaborador: dict[str, Any] | None = None
     ultimas_divergencias: list[dict[str, Any]] = Field(default_factory=list)
     id_atestado_confirmado: int | None = None
     prazo_entrega_fisica: str | None = None
@@ -261,20 +262,30 @@ def _normalizar_valor_campo(valor: Any) -> str:
     return str(valor).strip()
 
 
-def calcular_campos_corrigidos(
-    extraido: dict[str, Any] | None,
-    editado: dict[str, Any],
-) -> list[str]:
-    """Compara `extraido` vs `editado` e retorna exatamente os campos alterados."""
-    if extraido is None:
-        return []
+_ROTULOS_DIFF: dict[str, str] = {
+    "tipo_documento": "Tipo de documento",
+    "nome_no_documento": "Paciente no documento",
+    "periodo.inicio": "Início do afastamento",
+    "periodo.fim": "Término do afastamento",
+    "data_emissao": "Data de emissão",
+    "profissional.conselho": "Conselho profissional",
+    "profissional.numero": "Número do registro",
+    "profissional.uf": "UF do registro",
+    "profissional.nome": "Nome do profissional",
+    "cid": "Código CID-10",
+    "municipio": "Município de emissão",
+}
 
+
+def _pares_comparacao_atestado(
+    extraido: dict[str, Any],
+    editado: dict[str, Any],
+) -> list[tuple[str, Any, Any]]:
     ext_periodo = extraido.get("periodo") or {}
     edi_periodo = editado.get("periodo") or {}
     ext_prof = extraido.get("profissional") or {}
     edi_prof = editado.get("profissional") or {}
-
-    pares = (
+    return [
         ("tipo_documento", extraido.get("tipo_documento"), editado.get("tipo_documento")),
         ("nome_no_documento", extraido.get("nome_no_documento"), editado.get("nome_no_documento")),
         ("periodo.inicio", ext_periodo.get("inicio"), edi_periodo.get("inicio")),
@@ -283,14 +294,49 @@ def calcular_campos_corrigidos(
         ("profissional.conselho", ext_prof.get("conselho"), edi_prof.get("conselho")),
         ("profissional.numero", ext_prof.get("numero"), edi_prof.get("numero")),
         ("profissional.uf", ext_prof.get("uf"), edi_prof.get("uf")),
+        ("profissional.nome", ext_prof.get("nome"), edi_prof.get("nome")),
         ("cid", extraido.get("cid"), editado.get("cid")),
         ("municipio", extraido.get("municipio"), editado.get("municipio")),
-    )
+    ]
+
+
+def calcular_campos_corrigidos(
+    extraido: dict[str, Any] | None,
+    editado: dict[str, Any],
+) -> list[str]:
+    """Compara `extraido` vs `editado` e retorna exatamente os campos alterados."""
+    if extraido is None:
+        return []
+
     alterados: list[str] = []
-    for nome_campo, v_ext, v_edi in pares:
+    for nome_campo, v_ext, v_edi in _pares_comparacao_atestado(extraido, editado):
         if _normalizar_valor_campo(v_ext) != _normalizar_valor_campo(v_edi):
             alterados.append(nome_campo)
     return alterados
+
+
+def resumir_diff_edicao(
+    extraido: dict[str, Any] | None,
+    editado: dict[str, Any],
+) -> list[dict[str, str]]:
+    """Retorna lista estruturada de alterações Antes (IA) -> Depois (Manual)."""
+    if extraido is None:
+        return []
+
+    diffs: list[dict[str, str]] = []
+    for nome_campo, v_ext, v_edi in _pares_comparacao_atestado(extraido, editado):
+        str_ext = _normalizar_valor_campo(v_ext)
+        str_edi = _normalizar_valor_campo(v_edi)
+        if str_ext != str_edi:
+            diffs.append(
+                {
+                    "campo": nome_campo,
+                    "rotulo": _ROTULOS_DIFF.get(nome_campo, nome_campo),
+                    "antes_ia": str_ext or "Não identificado",
+                    "depois_manual": str_edi or "(vazio)",
+                }
+            )
+    return diffs
 
 
 def montar_tarefa_confirmar(
@@ -372,6 +418,7 @@ def aplicar_resultado_ao_caso(
         )
         if status != "ERRO" and "atestado_extraido" in payload:
             novo.ultimo_atestado_extraido = payload["atestado_extraido"]
+            novo.ultima_revisao_colaborador = payload.get("revisao_colaborador")
             novo.ultimas_divergencias = list(payload.get("divergencias") or [])
             if novo.ultimo_atestado_extraido.get("legibilidade") == "ok":
                 novo.tem_documento = True
@@ -445,8 +492,46 @@ def comparar_com_esperado(
             diffs.append(
                 f"{campo}: obtido={obtido.get(campo)!r} != esperado={esperado.get(campo)!r}"
             )
-    if obtido.get("payload") != esperado.get("payload"):
-        diffs.append("payload difere do esperado.")
+    if modo_llm == "mock":
+        if obtido.get("payload") != esperado.get("payload"):
+            diffs.append("payload difere do esperado.")
+    else:
+        obt_payload = obtido.get("payload") or {}
+        esp_payload = esperado.get("payload") or {}
+        if "atestado_extraido" in esp_payload:
+            obt_ext = obt_payload.get("atestado_extraido") or {}
+            esp_ext = esp_payload.get("atestado_extraido") or {}
+            for chave_ext in (
+                "tipo_documento",
+                "legibilidade",
+                "nome_no_documento",
+                "periodo",
+                "data_emissao",
+                "cid",
+                "municipio",
+            ):
+                if obt_ext.get(chave_ext) != esp_ext.get(chave_ext):
+                    diffs.append(
+                        f"atestado_extraido.{chave_ext}: obtido={obt_ext.get(chave_ext)!r} != esperado={esp_ext.get(chave_ext)!r}"
+                    )
+            obt_prof = obt_ext.get("profissional") or {}
+            esp_prof = esp_ext.get("profissional") or {}
+            for chave_prof in ("conselho", "numero", "uf"):
+                if obt_prof.get(chave_prof) != esp_prof.get(chave_prof):
+                    diffs.append(
+                        f"atestado_extraido.profissional.{chave_prof}: obtido={obt_prof.get(chave_prof)!r} != esperado={esp_prof.get(chave_prof)!r}"
+                    )
+            if obt_payload.get("divergencias") != esp_payload.get("divergencias"):
+                diffs.append("payload.divergencias difere do esperado.")
+            esp_rev = esp_payload.get("revisao_colaborador")
+            obt_rev = obt_payload.get("revisao_colaborador")
+            if esp_rev is not None and (
+                not isinstance(obt_rev, dict)
+                or obt_rev.get("resumo_markdown") != esp_rev.get("resumo_markdown")
+            ):
+                diffs.append("payload.revisao_colaborador difere do esperado.")
+        elif obt_payload != esp_payload:
+            diffs.append("payload difere do esperado.")
     if obtido.get("eventos") != esperado.get("eventos"):
         diffs.append("eventos diferem do esperado.")
     dec_obt = (obtido.get("decisao") or {}).get("usou_llm")
