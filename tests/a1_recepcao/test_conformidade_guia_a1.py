@@ -28,8 +28,10 @@ from sinergia.agentes.a1_recepcao import (
     RepositorioA1Postgres,
     ResultadoA1,
     criar_app_a1,
+    executar_modelo,
     exportar_json_schemas_a1,
     extrair_atestado_via_llm,
+    gerar_mensagem_confirmacao_extracao,
     limpar_cache_idempotencia,
     obter_config_a1,
     ocr,
@@ -742,3 +744,414 @@ def test_fastapi_modo_local_por_variaveis_ambiente(
     res_exec = client.post("/executar", json=tarefa)
     assert res_exec.status_code == 200
     assert res_exec.json()["status"] == "OK"
+
+
+def test_desambiguacao_multiplos_casos_pendentes_por_id_caso(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Garante que múltiplos casos pendentes do mesmo colaborador não colidem no confirmar."""
+    repo = RepositorioA1Memoria()
+    cfg = A1Config(groq_api_key="", politica_extrair_cid=False)
+
+    def _criar_img_atestado(nome_arq: str, inicio_br: str, fim_br: str, dias: int) -> Path:
+        caminho = tmp_path / nome_arq
+        im = Image.new("RGB", (640, 260), "white")
+        ImageDraw.Draw(im).text(
+            (20, 30),
+            f"ATESTADO MEDICO\n"
+            f"Atesto que a Sra. Carla Souza necessita de {dias} dias\n"
+            f"de afastamento de {inicio_br} a {fim_br}.\n"
+            f"Campinas - SP, {inicio_br}.\n"
+            "Dr. Marcos Lima - CRM/SP 123456",
+            fill="black",
+        )
+        im.save(caminho)
+        return caminho
+
+    img_105 = _criar_img_atestado("caso_105.png", "09/11/2026", "11/11/2026", 3)
+    img_106 = _criar_img_atestado("caso_106.png", "16/11/2026", "20/11/2026", 5)
+
+    agente = AgenteA1(db=repo, llm=MockLLM(), config=cfg)
+
+    t_105 = copy.deepcopy(
+        _carregar_fixture("a1.processar_documento/carla_divergencia_dias.tarefa.json")
+    )
+    t_105["id_mensagem"] = "multi-doc-105"
+    t_105["correlacao"] = {"id_caso": 105, "thread_id": "chat-42-105", "id_tarefa": "t-105"}
+    t_105["registro_inicial"]["id_caso"] = 105
+    t_105["registro_inicial"]["thread_id"] = "chat-42-105"
+    t_105["payload"] = {"arquivo_uri": str(img_105), "mime": "image/png"}
+    r_105 = agente.executar(t_105)
+    assert r_105["status"] == "PRECISA_HUMANO"
+
+    t_106 = copy.deepcopy(t_105)
+    t_106["id_mensagem"] = "multi-doc-106"
+    t_106["correlacao"] = {"id_caso": 106, "thread_id": "chat-42-106", "id_tarefa": "t-106"}
+    t_106["registro_inicial"]["id_caso"] = 106
+    t_106["registro_inicial"]["thread_id"] = "chat-42-106"
+    t_106["registro_inicial"]["inicio_informado"] = "2026-11-16"
+    t_106["registro_inicial"]["dias_informados"] = 5
+    t_106["payload"] = {"arquivo_uri": str(img_106), "mime": "image/png"}
+    r_106 = agente.executar(t_106)
+    assert r_106["status"] == "PRECISA_HUMANO"
+
+    pend_105 = repo.obter_ultimo_atestado_pendente(42, id_caso=105)
+    pend_106 = repo.obter_ultimo_atestado_pendente(42, id_caso=106)
+    assert pend_105 is not None and pend_106 is not None
+    assert pend_105.id_atestado != pend_106.id_atestado
+
+    # Simula reinício completo do serviço (sem cache em memória)
+    limpar_cache_idempotencia()
+    agente_reiniciado = AgenteA1(db=repo, llm=MockLLM(), config=cfg)
+
+    t_conf_105 = copy.deepcopy(
+        _carregar_fixture("a1.confirmar/carla_confirmado_ia.tarefa.json")
+    )
+    t_conf_105["id_mensagem"] = "multi-conf-105"
+    t_conf_105["correlacao"] = {
+        "id_caso": 105,
+        "thread_id": "chat-42-105",
+        "id_tarefa": "t-105-conf",
+    }
+    r_conf_105 = agente_reiniciado.executar(t_conf_105)
+    assert r_conf_105["status"] == "OK"
+    assert r_conf_105["payload"]["id_atestado"] == pend_105.id_atestado
+
+    at_105_db = repo.obter_atestado(pend_105.id_atestado)
+    at_106_db = repo.obter_atestado(pend_106.id_atestado)
+    assert at_105_db is not None and at_105_db.status == "CONFIRMADO"
+    assert at_106_db is not None and at_106_db.status == "PENDENTE"
+
+    # Caso 107 (sem pendente prévio) não deve capturar o PENDENTE do Caso 106
+    t_conf_107 = copy.deepcopy(t_conf_105)
+    t_conf_107["id_mensagem"] = "multi-conf-107"
+    t_conf_107["correlacao"] = {
+        "id_caso": 107,
+        "thread_id": "chat-42-107",
+        "id_tarefa": "t-107-conf",
+    }
+    t_conf_107["registro_inicial"]["id_caso"] = 107
+    t_conf_107["registro_inicial"]["thread_id"] = "chat-42-107"
+    t_conf_107["payload"] = {
+        "atestado_confirmado": {
+            "periodo": {"inicio": "2026-12-01", "fim": "2026-12-02"},
+            "data_emissao": "2026-12-01",
+            "profissional": {"conselho": "CRM", "numero": "998877", "uf": "SP"},
+        },
+        "campos_corrigidos": [],
+    }
+    r_conf_107 = agente_reiniciado.executar(t_conf_107)
+    assert r_conf_107["status"] == "OK"
+    assert r_conf_107["payload"]["id_atestado"] != pend_106.id_atestado
+    at_106_apos = repo.obter_atestado(pend_106.id_atestado)
+    assert at_106_apos is not None and at_106_apos.status == "PENDENTE"
+
+    # Valida também que RepositorioA1Postgres filtra por id_caso = %s na SQL
+    queries_pg: list[tuple[str, Any]] = []
+
+    class _FakeCursorIdCaso:
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def execute(self, sql: str, params: Any = None) -> None:
+            queries_pg.append((sql, params))
+
+        def fetchone(self) -> dict[str, Any] | None:
+            return None
+
+    class _FakeConnIdCaso:
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def cursor(self) -> _FakeCursorIdCaso:
+            return _FakeCursorIdCaso()
+
+    import sinergia.agentes.a1_recepcao.repositorio as repo_mod
+
+    monkeypatch.setattr(repo_mod.psycopg, "connect", lambda *a, **kw: _FakeConnIdCaso())
+    repo_pg = RepositorioA1Postgres("postgresql://fake:fake@localhost:5432/sinergia")
+    assert repo_pg.obter_ultimo_atestado_pendente(42, id_caso=105) is None
+    assert len(queries_pg) == 2
+    assert "id_caso = %s" in queries_pg[0][0]
+    assert queries_pg[0][1] == (42, 105)
+    assert "id_caso IS NULL" in queries_pg[1][0]
+
+
+def test_adaptador_db_tuplas_sqlalchemy_e_retorno_modelo_agente_a1() -> None:
+    """Valida adaptador de db (tuplas DB-API, SQLAlchemy Session/Engine) e ResultadoA1."""
+
+    class _FakeTupleCursor:
+        def __init__(self) -> None:
+            self.description: list[tuple[str]] = []
+            self._rows: list[tuple[Any, ...]] = []
+
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def execute(self, sql: str, params: Any = None) -> None:
+            s = sql.lower()
+            if "from cadastro.colaborador c" in s:
+                self.description = [
+                    ("id_colaborador",),
+                    ("matricula",),
+                    ("nome",),
+                    ("id_cargo",),
+                    ("id_setor",),
+                    ("id_area",),
+                    ("id_municipio",),
+                    ("municipio_nome",),
+                    ("sigla_uf",),
+                    ("data_admissao",),
+                    ("ativo",),
+                    ("cargo_nome",),
+                    ("setor_nome",),
+                ]
+                self._rows = [
+                    (
+                        42,
+                        "00123",
+                        "Carla Souza",
+                        15,
+                        7,
+                        2,
+                        3509502,
+                        "Campinas",
+                        "SP",
+                        date(2024, 3, 1),
+                        True,
+                        "Analista",
+                        "Logística",
+                    )
+                ]
+            else:
+                self.description = []
+                self._rows = []
+
+        def fetchone(self) -> tuple[Any, ...] | None:
+            return self._rows[0] if self._rows else None
+
+        def fetchall(self) -> list[tuple[Any, ...]]:
+            return list(self._rows)
+
+    class _FakeDbApiConn:
+        def __init__(self) -> None:
+            self.commits = 0
+            self.closed = False
+
+        def cursor(self) -> _FakeTupleCursor:
+            return _FakeTupleCursor()
+
+        def commit(self) -> None:
+            self.commits += 1
+
+        def close(self) -> None:
+            self.closed = True
+
+    # 1. Conexão DB-API pura retornando tuplas (não deve ser fechada pelo repositório)
+    dbapi_conn = _FakeDbApiConn()
+    repo_dbapi = RepositorioA1Postgres(conn=dbapi_conn)
+    colab_dbapi = repo_dbapi.conferir_colaborador_ativo(42)
+    assert colab_dbapi is not None
+    assert colab_dbapi.nome == "Carla Souza"
+    assert dbapi_conn.closed is False
+
+    # 2. Objeto simulando SQLAlchemy Session
+    class _FakeSaConnection:
+        def __init__(self, raw: _FakeDbApiConn) -> None:
+            self.connection = raw
+
+    class _FakeSaSession:
+        def __init__(self, raw: _FakeDbApiConn) -> None:
+            self._raw = raw
+            self.commits = 0
+
+        def connection(self) -> _FakeSaConnection:
+            return _FakeSaConnection(self._raw)
+
+        def commit(self) -> None:
+            self.commits += 1
+
+    sa_session = _FakeSaSession(_FakeDbApiConn())
+    agente_sa = AgenteA1(db=sa_session, llm=MockLLM())
+    assert isinstance(agente_sa.repositorio, RepositorioA1Postgres)
+    colab_sa = agente_sa.repositorio.conferir_colaborador_ativo(42)
+    assert colab_sa is not None and colab_sa.id_municipio == 3509502
+
+    # 3. Objeto simulando SQLAlchemy Engine (faz checkout e fecha raw_connection)
+    raw_engine_conn = _FakeDbApiConn()
+
+    class _FakeSaEngine:
+        def raw_connection(self) -> _FakeDbApiConn:
+            return raw_engine_conn
+
+    repo_engine = RepositorioA1Postgres(conn=_FakeSaEngine())
+    colab_engine = repo_engine.conferir_colaborador_ativo(42)
+    assert colab_engine is not None and colab_engine.nome == "Carla Souza"
+    assert raw_engine_conn.closed is True
+
+    # 4. Retorno como modelo Pydantic ResultadoA1 (`retornar_modelo=True` e `executar_modelo`)
+    tarefa_conv = _carregar_fixture("a1.conversar/falta_arquivo.tarefa.json")
+    agente_modelo = AgenteA1(
+        db=RepositorioA1Memoria(),
+        llm=MockLLM(),
+        config=A1Config(groq_api_key="", politica_extrair_cid=False),
+        retornar_modelo=True,
+    )
+    res_modelo = agente_modelo.executar(tarefa_conv)
+    assert isinstance(res_modelo, ResultadoA1)
+    assert res_modelo.status == "OK"
+    assert json.loads(res_modelo.model_dump_json())["estado_proposto"] == "NOVO"
+
+    res_servico_modelo = agente_modelo.executar_modelo(tarefa_conv)
+    assert isinstance(res_servico_modelo, ResultadoA1)
+    assert res_servico_modelo.em_resposta_a == tarefa_conv["id_mensagem"]
+
+    res_func_modelo = executar_modelo(
+        tarefa_conv,
+        repositorio=RepositorioA1Memoria(),
+        llm=MockLLM(),
+        config=A1Config(groq_api_key="", politica_extrair_cid=False),
+    )
+    assert isinstance(res_func_modelo, ResultadoA1)
+    assert res_func_modelo.payload["faltando"] == ["arquivo"]
+
+
+def test_fallback_estruturado_groq_em_erro_runtime_json_schema_sem_mascarar_auth() -> None:
+    """Garante fallback de `json_schema` para `function_calling` em HTTP 400 sem mascarar 401."""
+
+    class _BadRequestError(Exception):
+        def __init__(self, message: str, status_code: int = 400) -> None:
+            super().__init__(message)
+            self.status_code = status_code
+
+    class _AuthError(Exception):
+        def __init__(self, message: str, status_code: int = 401) -> None:
+            super().__init__(message)
+            self.status_code = status_code
+
+    class _RunnableFallback:
+        def __init__(self, method: str | None) -> None:
+            self._method = method
+
+        def invoke(self, _mensagens: Any) -> AtestadoExtraido:
+            if self._method == "json_schema":
+                raise _BadRequestError(
+                    "response_format json_schema rejected: additionalProperties is not supported",
+                    status_code=400,
+                )
+            return AtestadoExtraido(
+                legibilidade="ok",
+                nome_no_documento="Carla Souza",
+                periodo=PeriodoAfastamento(
+                    inicio=date(2026, 11, 9), fim=date(2026, 11, 11)
+                ),
+                profissional=ProfissionalExtraido(
+                    conselho="CRM", numero="123456", uf="SP"
+                ),
+            )
+
+    class _LLMFallback:
+        model_name = "groq/fallback-test"
+
+        def __init__(self) -> None:
+            self.metodos_chamados: list[str | None] = []
+
+        def with_structured_output(
+            self, _schema: type[Any], **kwargs: Any
+        ) -> _RunnableFallback:
+            metodo = kwargs.get("method")
+            self.metodos_chamados.append(metodo)
+            return _RunnableFallback(metodo)
+
+    llm_fb = _LLMFallback()
+    ext, dec = extrair_atestado_via_llm("ATESTADO CARLA", llm=llm_fb)
+    assert ext.legibilidade == "ok"
+    assert ext.profissional.numero == "123456"
+    assert dec.modelo == "groq/fallback-test"
+    assert llm_fb.metodos_chamados == ["json_schema", "function_calling"]
+
+    class _RunnableAuthError:
+        def invoke(self, _mensagens: Any) -> AtestadoExtraido:
+            raise _AuthError("Invalid API Key (401 Unauthorized)", status_code=401)
+
+    class _LLMAuthError:
+        model_name = "groq/auth-error"
+
+        def __init__(self) -> None:
+            self.metodos_chamados: list[str | None] = []
+
+        def with_structured_output(
+            self, _schema: type[Any], **kwargs: Any
+        ) -> _RunnableAuthError:
+            self.metodos_chamados.append(kwargs.get("method"))
+            return _RunnableAuthError()
+
+    llm_auth = _LLMAuthError()
+    with pytest.raises(_AuthError, match="401 Unauthorized"):
+        extrair_atestado_via_llm("ATESTADO CARLA", llm=llm_auth)
+    assert llm_auth.metodos_chamados == ["json_schema"]
+
+
+def test_politica_cid_nao_extrair_e_sigilo_nao_sinalizam_baixa_confianca_cid() -> None:
+    """Garante que CID nulo por política LGPD ou sigilo médico não gera pedido de CID."""
+    base_com_cid = AtestadoExtraido(
+        legibilidade="ok",
+        nome_no_documento="Carla Souza",
+        periodo=PeriodoAfastamento(inicio=date(2026, 11, 9), fim=date(2026, 11, 11)),
+        data_emissao=date(2026, 11, 9),
+        profissional=ProfissionalExtraido(conselho="CRM", numero="123456", uf="SP"),
+        cid="J06.9",
+        municipio="Campinas",
+        confianca_campos={
+            "nome_no_documento": 0.96,
+            "periodo.inicio": 0.95,
+            "periodo.fim": 0.95,
+            "data_emissao": 0.95,
+            "profissional.conselho": 0.96,
+            "profissional.numero": 0.96,
+            "profissional.uf": 0.96,
+            "cid": 0.0,
+            "municipio": 0.92,
+        },
+    )
+
+    # 1. extrair_cid=False -> nunca inclui 'cid' em campos nem pede código CID
+    sem_cid = base_com_cid.aplicar_politica_e_limiar(
+        extrair_cid=False, limiar_confianca=0.8
+    )
+    assert sem_cid.cid is None
+    assert "cid" not in sem_cid.campos
+    msg_sem_cid = gerar_mensagem_confirmacao_extracao(sem_cid, [])
+    assert "código CID" not in msg_sem_cid
+
+    # 2. extrair_cid=True e cid=None (sigilo médico) -> não sinaliza baixa confiança
+    sigilo = base_com_cid.model_copy(update={"cid": None})
+    aplicado_sigilo = sigilo.aplicar_politica_e_limiar(
+        extrair_cid=True, limiar_confianca=0.8
+    )
+    assert aplicado_sigilo.cid is None
+    assert "cid" not in aplicado_sigilo.campos
+
+    # 3. extrair_cid=True com CID extraído mas confiança < 0.8 -> zera e sinaliza
+    baixa_conf = base_com_cid.model_copy(
+        update={
+            "confianca_campos": {**base_com_cid.confianca_campos, "cid": 0.50}  # type: ignore[dict-item]
+        }
+    )
+    aplicado_baixa = baixa_conf.aplicar_politica_e_limiar(
+        extrair_cid=True, limiar_confianca=0.8
+    )
+    assert aplicado_baixa.cid is None
+    assert "cid" in aplicado_baixa.campos
+    assert aplicado_baixa.campos["cid"].vazio_por_baixa_confianca is True
+    assert aplicado_baixa.campos["cid"].confianca == 0.50

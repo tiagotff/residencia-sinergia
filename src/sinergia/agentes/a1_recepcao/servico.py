@@ -767,7 +767,9 @@ class ServicoA1:
         )
 
         base_extraida = self._obter_extracao_pendente(tarefa)
-        pendente_db = self.repositorio.obter_ultimo_atestado_pendente(id_colaborador)
+        pendente_db = self.repositorio.obter_ultimo_atestado_pendente(
+            id_colaborador, id_caso=id_caso
+        )
         if base_extraida is None and pendente_db is not None:
             base_extraida = _reconstruir_base_de_pendente(
                 pendente_db, repositorio=self.repositorio
@@ -1113,6 +1115,10 @@ class ServicoA1:
             self._cache_idempotencia[tarefa_obj.id_mensagem] = copy.deepcopy(serializado)
             return serializado
 
+    def executar_modelo(self, tarefa: dict[str, Any] | TarefaA1) -> ResultadoA1:
+        """Executa uma `TAREFA` e devolve o envelope validado como `ResultadoA1`."""
+        return ResultadoA1.model_validate(self.executar(tarefa))
+
 
 class AgenteA1(ServicoA1):
     """Alias oficial do Guia A1 v0.7 (`AgenteA1(db=sessao, llm=cliente_groq)`)."""
@@ -1127,6 +1133,7 @@ class AgenteA1(ServicoA1):
         cache_idempotencia: Any | None = None,
         extracoes_pendentes: dict[tuple[str | int, int, int | None], AtestadoExtraido]
         | None = None,
+        retornar_modelo: bool = False,
     ) -> None:
         cfg = config or obter_config_a1()
         repo_final: RepositorioA1Protocol | None
@@ -1139,6 +1146,7 @@ class AgenteA1(ServicoA1):
         else:
             repo_final = RepositorioA1Postgres(cfg.database_url, conn=db)
 
+        self._retornar_modelo = retornar_modelo
         super().__init__(
             repositorio=repo_final,
             llm=llm,
@@ -1146,6 +1154,14 @@ class AgenteA1(ServicoA1):
             cache_idempotencia=cache_idempotencia,
             extracoes_pendentes=extracoes_pendentes,
         )
+
+    def executar(
+        self, tarefa: dict[str, Any] | TarefaA1
+    ) -> dict[str, Any] | ResultadoA1:
+        resultado = super().executar(tarefa)
+        if self._retornar_modelo:
+            return ResultadoA1.model_validate(resultado)
+        return resultado
 
 
 def executar(
@@ -1164,3 +1180,21 @@ def executar(
         extracoes_pendentes=_EXTRACOES_PENDENTES_MODULO,
     )
     return servico.executar(tarefa)
+
+
+def executar_modelo(
+    tarefa: dict[str, Any] | TarefaA1,
+    *,
+    repositorio: RepositorioA1Protocol | None = None,
+    llm: Any | None = None,
+    config: A1Config | None = None,
+) -> ResultadoA1:
+    """Versão tipada de `executar(tarefa)` que retorna `ResultadoA1`."""
+    return ResultadoA1.model_validate(
+        executar(
+            tarefa,
+            repositorio=repositorio,
+            llm=llm,
+            config=config,
+        )
+    )

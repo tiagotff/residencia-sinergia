@@ -78,6 +78,7 @@ from sinergia.agentes.a1_recepcao.servico import (
     AgenteA1,
     ServicoA1,
     executar,
+    executar_modelo,
     limpar_cache_idempotencia,
 )
 from sinergia.agentes.a1_recepcao.validador import (
@@ -165,6 +166,7 @@ __all__ = [
     "criar_app_a1",
     "detectar_divergencias",
     "executar",
+    "executar_modelo",
     "exportar_json_schemas_a1",
     "extrair_atestado_via_llm",
     "garantir_atestados_sinteticos",

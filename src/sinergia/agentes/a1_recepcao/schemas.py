@@ -253,6 +253,7 @@ class AtestadoExtraido(BaseModel):
         copia = self.model_copy(deep=True)
         if not extrair_cid:
             copia.cid = None
+            copia.campos.pop("cid", None)
 
         if copia.confianca_campos:
             c = copia.confianca_campos
@@ -285,7 +286,7 @@ class AtestadoExtraido(BaseModel):
                 copia.profissional.numero = None
             if _checar_e_zerar("profissional.uf", "uf"):
                 copia.profissional.uf = None
-            if _checar_e_zerar("cid"):
+            if extrair_cid and copia.cid is not None and _checar_e_zerar("cid"):
                 copia.cid = None
             if _checar_e_zerar("municipio"):
                 copia.municipio = None

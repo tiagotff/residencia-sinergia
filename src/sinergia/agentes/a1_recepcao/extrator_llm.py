@@ -16,6 +16,7 @@ Implementa a Task 1A.3 alinhada à ``Documentação - SinergIA v2.2.docx``
 
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 from collections.abc import Callable, Sequence
@@ -24,7 +25,7 @@ from functools import lru_cache
 from typing import Any
 
 from langchain_groq import ChatGroq
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from sinergia.agentes.a1_recepcao.config import A1Config, obter_config_a1
 from sinergia.agentes.a1_recepcao.prompts import (
@@ -41,6 +42,7 @@ from sinergia.agentes.a1_recepcao.schemas import (
     ResultadoOCR,
 )
 
+_LOGGER = logging.getLogger(__name__)
 _LIMIAR_OCR_ILEGIVEL = 0.30
 _CONFIANCA_PADRAO_EXTRATOR = 0.92
 
@@ -420,21 +422,90 @@ def _obter_nome_modelo(llm: Any, config: A1Config) -> str:
     return config.llm_model
 
 
+def _erro_rejeicao_schema_estruturado(exc: Exception) -> bool:
+    """Identifica falhas ligadas ao formato estruturado, sem mascarar auth/quota/rede."""
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return False
+
+    status_code = getattr(exc, "status_code", None)
+    if status_code in {401, 403, 404, 429, 500, 502, 503, 504}:
+        return False
+
+    mensagem = str(exc).lower()
+    indicadores_nao_schema = (
+        "unauthorized",
+        "invalid api key",
+        "authentication",
+        "rate limit",
+        "too many requests",
+        "timeout",
+        "timed out",
+    )
+    if any(ind in mensagem for ind in indicadores_nao_schema):
+        return False
+
+    if isinstance(exc, (TypeError, ValueError, NotImplementedError, ValidationError)):
+        return True
+    if status_code == 400:
+        return True
+
+    nome_classe = type(exc).__name__.lower()
+    if "badrequest" in nome_classe or "unprocessable" in nome_classe:
+        return True
+
+    indicadores_schema = (
+        "json_schema",
+        "response_format",
+        "additionalproperties",
+        "json_validate_failed",
+        "tool_use_failed",
+        "structured",
+        "schema",
+        "failed_generation",
+    )
+    return any(ind in mensagem for ind in indicadores_schema)
+
+
 def _invocar_estruturado[TModel: BaseModel](
     llm: Any,
     schema: type[TModel],
     mensagens: list[tuple[str, str]],
 ) -> TModel:
-    """Executa `.with_structured_output` usando `json_schema` com fallback seguro."""
-    try:
-        runnable = llm.with_structured_output(schema, method="json_schema")
-    except TypeError:
-        runnable = llm.with_structured_output(schema)
+    """Executa `.with_structured_output` com fallback resiliente em runtime."""
+    estrategias: tuple[dict[str, Any], ...] = (
+        {"method": "json_schema"},
+        {"method": "function_calling"},
+        {},
+    )
+    ultimo_erro: Exception | None = None
 
-    bruto = runnable.invoke(mensagens)
-    if isinstance(bruto, schema):
-        return bruto
-    return schema.model_validate(bruto)
+    for indice, kwargs_metodo in enumerate(estrategias):
+        try:
+            runnable = llm.with_structured_output(schema, **kwargs_metodo)
+        except TypeError as exc:
+            ultimo_erro = exc
+            continue
+
+        try:
+            bruto = runnable.invoke(mensagens)
+        except Exception as exc:
+            if not _erro_rejeicao_schema_estruturado(exc) or indice == len(estrategias) - 1:
+                raise
+            _LOGGER.warning(
+                "Fallback em with_structured_output(%s) apos falha com %s: %s",
+                schema.__name__,
+                kwargs_metodo or "padrao",
+                type(exc).__name__,
+            )
+            ultimo_erro = exc
+            continue
+
+        if isinstance(bruto, schema):
+            return bruto
+        return schema.model_validate(bruto)
+
+    assert ultimo_erro is not None
+    raise ultimo_erro
 
 
 def _calcular_confianca_extracao(

@@ -1,0 +1,1004 @@
+"""Aplicação Streamlit de configuração, simulação e homologação A0 <-> A1."""
+
+from __future__ import annotations
+
+import copy
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import streamlit as st
+
+from sinergia.agentes.a1_recepcao.avaliacao_metricas import avaliar_metricas_task_32
+from sinergia.agentes.a1_recepcao.config import A1Config, obter_config_a1
+from sinergia.agentes.a1_recepcao.gerador_sintetico import garantir_atestados_sinteticos
+from sinergia.agentes.a1_recepcao.painel.cliente_conexao import (
+    ClienteConexaoA0A1,
+    ModoLLMConexao,
+    ModoRepositorio,
+    ModoTransporte,
+    PerfilInspecao,
+    RegistroTrocaProtocolo,
+    validar_envelope_sinergia,
+)
+from sinergia.agentes.a1_recepcao.painel.diagnostico import (
+    ItemDiagnostico,
+    executar_diagnostico_completo,
+    mascarar_segredo,
+    sanitizar_url_conexao,
+    verificar_endpoint_http,
+)
+from sinergia.agentes.a1_recepcao.painel.emulador_a0 import (
+    EstadoCasoSimulado,
+    aplicar_resultado_ao_caso,
+    calcular_campos_corrigidos,
+    carregar_fixtures_oficiais,
+    comparar_com_esperado,
+    criar_caso_padrao,
+    gerar_preview_documento_png,
+    limpar_uploads_temporarios,
+    montar_tarefa_baixa_fisica,
+    montar_tarefa_confirmar,
+    montar_tarefa_conversar,
+    montar_tarefa_processar_documento,
+    salvar_upload_temporario,
+)
+from sinergia.agentes.a1_recepcao.painel.tema import (
+    aplicar_estilo_painel,
+    renderizar_badge_status,
+    renderizar_card_kpi,
+    renderizar_stepper_estados,
+)
+from sinergia.agentes.a1_recepcao.repositorio import RepositorioA1Memoria
+
+_MODELOS_GROQ_SUGERIDOS: tuple[str, ...] = (
+    "openai/gpt-oss-120b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+)
+
+
+def _inicializar_estado() -> None:
+    cfg_padrao = obter_config_a1()
+    if "painel_casos" not in st.session_state:
+        caso_inicial = criar_caso_padrao(105)
+        st.session_state.painel_casos = {105: caso_inicial}
+    if "painel_id_caso_ativo" not in st.session_state:
+        st.session_state.painel_id_caso_ativo = 105
+    if "painel_repo_memoria" not in st.session_state:
+        st.session_state.painel_repo_memoria = RepositorioA1Memoria()
+    if "painel_cache_idempotencia" not in st.session_state:
+        st.session_state.painel_cache_idempotencia = {}
+    if "painel_extracoes_pendentes" not in st.session_state:
+        st.session_state.painel_extracoes_pendentes = {}
+    if "painel_diagnostico" not in st.session_state:
+        st.session_state.painel_diagnostico = []
+    if "painel_metricas_sec10" not in st.session_state:
+        st.session_state.painel_metricas_sec10 = None
+    if "painel_ultimo_replay" not in st.session_state:
+        st.session_state.painel_ultimo_replay = None
+    if "painel_health_a1" not in st.session_state:
+        st.session_state.painel_health_a1 = None
+    if "painel_health_a0" not in st.session_state:
+        st.session_state.painel_health_a0 = None
+    if "painel_resultado_fixture" not in st.session_state:
+        st.session_state.painel_resultado_fixture = None
+    if "painel_suite_fixtures" not in st.session_state:
+        st.session_state.painel_suite_fixtures = None
+    if "painel_cfg_base" not in st.session_state:
+        st.session_state.painel_cfg_base = cfg_padrao
+
+
+def _renderizar_sidebar() -> tuple[ClienteConexaoA0A1, dict[str, Any]]:
+    cfg_base: A1Config = st.session_state.painel_cfg_base
+
+    with st.sidebar:
+        st.markdown("### Configuração Viva A0 ↔ A1")
+
+        st.markdown("**1. Transporte de Conexão**")
+        rotulos_transporte = {
+            "in_process": "In-Process Python (AgenteA1)",
+            "http_a1": "HTTP FastAPI A1 (POST /executar)",
+            "http_a0": "Orquestrador A0 Real (POST /chat)",
+        }
+        modo_transporte: ModoTransporte = st.selectbox(
+            "Modo de transporte",
+            options=["in_process", "http_a1", "http_a0"],
+            format_func=lambda m: rotulos_transporte[m],
+            key="sb_modo_transporte",
+        )
+
+        retornar_modelo = False
+        url_a1_http = "http://localhost:8001"
+        url_a0_http = "http://localhost:8000"
+        token_jwt_a0 = ""
+
+        if modo_transporte == "in_process":
+            retornar_modelo = st.toggle(
+                "Retornar modelo Pydantic (ResultadoA1)",
+                value=False,
+                key="sb_retornar_modelo",
+                help="Quando ativo, testa AgenteA1(..., retornar_modelo=True).",
+            )
+        elif modo_transporte == "http_a1":
+            url_a1_http = st.text_input(
+                "URL HTTP do Agente A1",
+                value="http://localhost:8001",
+                key="sb_url_a1_http",
+            )
+            if st.button("Testar /health do A1", key="sb_btn_health_a1"):
+                st.session_state.painel_health_a1 = verificar_endpoint_http(
+                    url_a1_http, "/health", nome="FastAPI A1"
+                )
+            if st.session_state.painel_health_a1 is not None:
+                item: ItemDiagnostico = st.session_state.painel_health_a1
+                st.caption(f"[{item.status.upper()}] {item.resumo}")
+        else:
+            url_a0_http = st.text_input(
+                "URL da API do Agente A0",
+                value="http://localhost:8000",
+                key="sb_url_a0_http",
+            )
+            token_jwt_a0 = st.text_input(
+                "Token JWT (Bearer)",
+                value="",
+                type="password",
+                key="sb_token_jwt_a0",
+            )
+            if st.button("Testar /health do A0", key="sb_btn_health_a0"):
+                st.session_state.painel_health_a0 = verificar_endpoint_http(
+                    url_a0_http, "/health", nome="API Orquestrador A0"
+                )
+            if st.session_state.painel_health_a0 is not None:
+                item_a0: ItemDiagnostico = st.session_state.painel_health_a0
+                st.caption(f"[{item_a0.status.upper()}] {item_a0.resumo}")
+
+        st.divider()
+        st.markdown("**2. Repositório de Dados**")
+        modo_repo: ModoRepositorio = st.radio(
+            "Persistência do A1",
+            options=["memoria", "postgres"],
+            format_func=lambda x: (
+                "Memória (RepositorioA1Memoria)"
+                if x == "memoria"
+                else "PostgreSQL 16 (DATABASE_URL)"
+            ),
+            key="sb_modo_repo",
+        )
+        database_url = cfg_base.database_url
+        if modo_repo == "postgres":
+            database_url = st.text_input(
+                "DATABASE_URL",
+                value=cfg_base.database_url,
+                key="sb_database_url",
+            )
+            st.caption(f"Ativo: `{sanitizar_url_conexao(database_url)}`")
+        elif st.button("Resetar banco em memória", key="sb_btn_reset_mem"):
+            st.session_state.painel_repo_memoria = RepositorioA1Memoria()
+            st.session_state.painel_cache_idempotencia = {}
+            st.session_state.painel_extracoes_pendentes = {}
+            st.success("Repositório em memória reiniciado.")
+
+        st.divider()
+        st.markdown("**3. Motor de LLM**")
+        opcoes_llm: list[ModoLLMConexao] = (
+            ["groq", "mock"] if cfg_base.groq_api_key.strip() else ["mock", "groq"]
+        )
+        modo_llm: ModoLLMConexao = st.radio(
+            "Cliente LLM",
+            options=opcoes_llm,
+            format_func=lambda x: (
+                "Groq Cloud Real" if x == "groq" else "MockLLM Determinístico (Offline)"
+            ),
+            key="sb_modo_llm",
+        )
+        modelos_lista = list(_MODELOS_GROQ_SUGERIDOS)
+        if cfg_base.llm_model and cfg_base.llm_model not in modelos_lista:
+            modelos_lista.insert(0, cfg_base.llm_model)
+        llm_model = st.selectbox("LLM_MODEL", options=modelos_lista, key="sb_llm_model")
+        llm_timeout = st.slider(
+            "LLM_TIMEOUT_SEGUNDOS",
+            min_value=5,
+            max_value=90,
+            value=int(cfg_base.llm_timeout_segundos),
+            key="sb_llm_timeout",
+        )
+        st.caption(f"`GROQ_API_KEY` no .env: `{mascarar_segredo(cfg_base.groq_api_key)}`")
+        groq_sessao = st.text_input(
+            "Sobrescrever GROQ_API_KEY na sessão (opcional)",
+            value="",
+            type="password",
+            key="sb_groq_override",
+        )
+        chave_groq_efetiva = groq_sessao.strip() or cfg_base.groq_api_key
+
+        st.divider()
+        st.markdown("**4. Regras de Negócio & LGPD**")
+        politica_cid_modo = st.selectbox(
+            "POLITICA_CID",
+            options=["extrair_restrito", "nao_extrair"],
+            index=0 if cfg_base.politica_extrair_cid else 1,
+            key="sb_politica_cid",
+        )
+        limiar_confianca = st.slider(
+            "LIMIAR_CONFIANCA_CAMPO",
+            min_value=0.50,
+            max_value=0.99,
+            value=float(cfg_base.limiar_confianca_campo),
+            step=0.05,
+            key="sb_limiar_conf",
+        )
+        prazo_dias = st.slider(
+            "PRAZO_ENTREGA_FISICA_DIAS_UTEIS",
+            min_value=1,
+            max_value=5,
+            value=int(cfg_base.prazo_entrega_fisica_dias_uteis),
+            key="sb_prazo_dias",
+        )
+        max_paginas_pdf = st.slider(
+            "MAX_PAGINAS_PDF",
+            min_value=1,
+            max_value=15,
+            value=int(cfg_base.max_paginas_pdf),
+            key="sb_max_paginas",
+        )
+
+        config_ativa = A1Config(
+            groq_api_key=chave_groq_efetiva,
+            llm_model=llm_model,
+            llm_timeout_segundos=float(llm_timeout),
+            database_url=database_url,
+            politica_extrair_cid=(politica_cid_modo == "extrair_restrito"),
+            politica_cid_modo=politica_cid_modo,
+            limiar_confianca_campo=float(limiar_confianca),
+            prazo_entrega_fisica_dias_uteis=int(prazo_dias),
+            atestados_storage_dir=cfg_base.atestados_storage_dir,
+            max_arquivo_bytes=cfg_base.max_arquivo_bytes,
+            max_paginas_pdf=int(max_paginas_pdf),
+        )
+
+        st.divider()
+        if st.button("Limpar uploads temporários", key="sb_btn_limpar_uploads"):
+            removidos = limpar_uploads_temporarios(config_ativa.atestados_storage_dir)
+            st.info(f"{removidos} arquivo(s) removido(s) de uploads_painel/.")
+
+        with st.expander("Gerar snippet .env (sem segredos)"):
+            snippet = "\n".join(
+                [
+                    f"LLM_MODEL={config_ativa.llm_model}",
+                    f"LLM_TIMEOUT_SEGUNDOS={int(config_ativa.llm_timeout_segundos)}",
+                    f"POLITICA_EXTRAIR_CID={str(config_ativa.politica_extrair_cid).lower()}",
+                    f"POLITICA_CID={config_ativa.politica_cid_modo}",
+                    f"LIMIAR_CONFIANCA_CAMPO={config_ativa.limiar_confianca_campo}",
+                    f"PRAZO_ENTREGA_FISICA_DIAS_UTEIS={config_ativa.prazo_entrega_fisica_dias_uteis}",
+                    f"ATESTADOS_STORAGE_DIR={config_ativa.atestados_storage_dir}",
+                    f"MAX_PAGINAS_PDF={config_ativa.max_paginas_pdf}",
+                ]
+            )
+            st.code(snippet, language="ini")
+
+    cliente = ClienteConexaoA0A1(
+        modo_transporte=modo_transporte,
+        config=config_ativa,
+        modo_repo=modo_repo,
+        modo_llm=modo_llm,
+        retornar_modelo=retornar_modelo,
+        url_a1_http=url_a1_http,
+        url_a0_http=url_a0_http,
+        token_jwt_a0=token_jwt_a0,
+        repositorio_memoria=st.session_state.painel_repo_memoria,
+        cache_idempotencia=st.session_state.painel_cache_idempotencia,
+        extracoes_pendentes=st.session_state.painel_extracoes_pendentes,
+    )
+    return cliente, {
+        "modo_transporte": modo_transporte,
+        "modo_repo": modo_repo,
+        "modo_llm": modo_llm,
+        "config": config_ativa,
+        "retornar_modelo": retornar_modelo,
+    }
+
+
+def _obter_caso_ativo() -> EstadoCasoSimulado:
+    casos: dict[int, EstadoCasoSimulado] = st.session_state.painel_casos
+    id_ativo: int = st.session_state.painel_id_caso_ativo
+    if id_ativo not in casos:
+        id_ativo = next(iter(casos.keys()))
+        st.session_state.painel_id_caso_ativo = id_ativo
+    return casos[id_ativo]
+
+
+def _registrar_troca_no_caso(troca: RegistroTrocaProtocolo) -> None:
+    caso = _obter_caso_ativo()
+    atualizado = aplicar_resultado_ao_caso(caso, troca)
+    st.session_state.painel_casos[atualizado.id_caso] = atualizado
+    st.session_state.painel_ultimo_replay = None
+
+
+def _renderizar_aba_simulador(
+    cliente: ClienteConexaoA0A1,
+    meta: dict[str, Any],
+) -> None:
+    casos: dict[int, EstadoCasoSimulado] = st.session_state.painel_casos
+    cfg: A1Config = meta["config"]
+
+    topo_c1, topo_c2, topo_c3 = st.columns([2.2, 1.0, 1.0])
+    with topo_c1:
+        ids_casos = sorted(casos.keys())
+        id_selecionado = st.selectbox(
+            "Caso ativo (desambiguação por id_caso / thread_id)",
+            options=ids_casos,
+            index=ids_casos.index(st.session_state.painel_id_caso_ativo),
+            format_func=lambda cid: (
+                f"Caso #{cid} ({casos[cid].thread_id}) — {casos[cid].estado_atual}"
+            ),
+            key="sim_select_caso",
+        )
+        if id_selecionado != st.session_state.painel_id_caso_ativo:
+            st.session_state.painel_id_caso_ativo = id_selecionado
+            st.rerun()
+    with topo_c2:
+        novo_id = max(ids_casos) + 1
+        if st.button(f"+ Novo Caso (#{novo_id})", key="sim_btn_novo_caso"):
+            casos[novo_id] = criar_caso_padrao(novo_id)
+            st.session_state.painel_id_caso_ativo = novo_id
+            st.rerun()
+    with topo_c3:
+        if st.button("Limpar histórico do caso", key="sim_btn_limpar_caso"):
+            cid_atual = st.session_state.painel_id_caso_ativo
+            casos[cid_atual] = criar_caso_padrao(cid_atual)
+            st.session_state.painel_ultimo_replay = None
+            st.rerun()
+
+    caso = _obter_caso_ativo()
+
+    if meta["modo_transporte"] == "http_a0":
+        with st.container(border=True):
+            st.markdown("#### Conexão Direta com Orquestrador A0 (`POST /chat`)")
+            msg_a0 = st.text_input(
+                "Mensagem para o endpoint do A0",
+                value="Preciso enviar um atestado médico de 3 dias.",
+                key="sim_a0_msg",
+            )
+            if st.button("Enviar para API do A0", key="sim_btn_enviar_a0"):
+                resp_a0 = cliente.enviar_chat_a0(
+                    msg_a0,
+                    thread_id=caso.thread_id,
+                    id_caso=caso.id_caso,
+                )
+                st.json(resp_a0)
+
+    col_esq, col_dir = st.columns([1.15, 1.0], gap="large")
+
+    with col_esq:
+        with st.expander("Registro Inicial do Caso (Anexo B — enviado pelo A0)", expanded=False):
+            c_r1, c_r2 = st.columns(2)
+            with c_r1:
+                nome_inf = st.text_input(
+                    "Nome no cadastro", value=caso.nome_colaborador, key=f"reg_nome_{caso.id_caso}"
+                )
+                inicio_inf = st.date_input(
+                    "Início informado",
+                    value=caso.inicio_informado,
+                    key=f"reg_ini_{caso.id_caso}",
+                )
+            with c_r2:
+                tipo_inf = st.selectbox(
+                    "Tipo de solicitação",
+                    options=["atestado_medico", "declaracao_comparecimento", "outro"],
+                    index=["atestado_medico", "declaracao_comparecimento", "outro"].index(
+                        caso.tipo_solicitacao
+                    )
+                    if caso.tipo_solicitacao in {"atestado_medico", "declaracao_comparecimento", "outro"}
+                    else 0,
+                    key=f"reg_tipo_{caso.id_caso}",
+                )
+                dias_inf = st.number_input(
+                    "Dias informados",
+                    min_value=1,
+                    max_value=180,
+                    value=int(caso.dias_informados),
+                    key=f"reg_dias_{caso.id_caso}",
+                )
+            caso.nome_colaborador = nome_inf
+            caso.inicio_informado = inicio_inf
+            caso.dias_informados = int(dias_inf)
+            caso.tipo_solicitacao = tipo_inf
+
+        st.markdown("#### 1. Conversa Inicial (`a1.conversar`)")
+        if caso.mensagens_chat:
+            with st.container(border=True):
+                for m in caso.mensagens_chat:
+                    rotulo = "Colaborador" if m["papel"] == "colaborador" else f"A1 -> {m.get('destinatario', 'colaborador')}"
+                    st.markdown(f"**{rotulo}:** {m['texto']}")
+
+        txt_conv = st.text_input(
+            "Mensagem do colaborador no chat",
+            value="Preciso enviar um atestado médico de 5 dias.",
+            key=f"conv_txt_{caso.id_caso}",
+        )
+        if st.button("Enviar a1.conversar", key=f"btn_conv_{caso.id_caso}"):
+            tarefa = montar_tarefa_conversar(caso, txt_conv)
+            troca = cliente.enviar_tarefa(tarefa)
+            _registrar_troca_no_caso(troca)
+            st.rerun()
+
+        st.markdown("#### 2. Documento do Atestado (`a1.processar_documento`)")
+        amostras = garantir_atestados_sinteticos(cfg.atestados_storage_dir)
+        opcoes_amostras = {
+            f"{a.id_amostra} (PNG)": (a.arquivo_png, "image/png", a.sha256_png)
+            for a in amostras
+        }
+        opcoes_amostras.update(
+            {
+                f"{a.id_amostra} (PDF)": (a.arquivo_pdf, "application/pdf", a.sha256_pdf)
+                for a in amostras
+            }
+        )
+
+        arquivo_up = st.file_uploader(
+            "Upload real de atestado (PNG, JPG ou PDF)",
+            type=["png", "jpg", "jpeg", "pdf"],
+            key=f"up_doc_{caso.id_caso}",
+        )
+        amostra_sel = st.selectbox(
+            "Ou selecione uma amostra sintética oficial (.storage/atestados/)",
+            options=list(opcoes_amostras.keys()),
+            key=f"sel_amostra_{caso.id_caso}",
+        )
+
+        caminho_prev = opcoes_amostras[amostra_sel][0]
+        if arquivo_up is None:
+            preview_bytes = gerar_preview_documento_png(caminho_prev)
+            if preview_bytes is not None:
+                with st.expander("Preview do documento selecionado", expanded=False):
+                    st.image(preview_bytes, caption=Path(caminho_prev).name, width=380)
+
+        if st.button("Processar Documento (a1.processar_documento)", key=f"btn_proc_{caso.id_caso}"):
+            if arquivo_up is not None:
+                uri, mime, sha256 = salvar_upload_temporario(
+                    arquivo_up.name,
+                    arquivo_up.getvalue(),
+                    cfg.atestados_storage_dir,
+                )
+            else:
+                uri, mime, sha256 = opcoes_amostras[amostra_sel]
+            tarefa_doc = montar_tarefa_processar_documento(caso, uri, mime, sha256)
+            troca_doc = cliente.enviar_tarefa(tarefa_doc)
+            _registrar_troca_no_caso(troca_doc)
+            st.rerun()
+
+        if caso.aguardando_hitl and caso.ultimo_atestado_extraido is not None:
+            st.markdown("#### 3. ⏸ Pausa Humana — Confirmação (`interrupt` / `a1.confirmar`)")
+            ext = caso.ultimo_atestado_extraido
+            with st.container(border=True):
+                if caso.ultimas_divergencias:
+                    for div in caso.ultimas_divergencias:
+                        st.warning(
+                            f"Divergência em **{div.get('campo')}**: "
+                            f"no documento=`{div.get('no_documento')}` vs informado=`{div.get('informado')}`"
+                        )
+                campos_meta = ext.get("campos") or {}
+                baixos = [
+                    k for k, v in campos_meta.items() if isinstance(v, dict) and v.get("vazio_por_baixa_confianca")
+                ]
+                if baixos:
+                    st.info(f"Campos zerados por confiança < {cfg.limiar_confianca_campo:.2f}: {', '.join(baixos)}")
+
+                ext_per = ext.get("periodo") or {}
+                ext_prof = ext.get("profissional") or {}
+                h_c1, h_c2 = st.columns(2)
+                with h_c1:
+                    ed_nome = st.text_input(
+                        "Nome no documento",
+                        value=ext.get("nome_no_documento") or "",
+                        key=f"hitl_nome_{caso.id_caso}",
+                    )
+                    ed_ini = st.text_input(
+                        "Início (YYYY-MM-DD)",
+                        value=ext_per.get("inicio") or "",
+                        key=f"hitl_ini_{caso.id_caso}",
+                    )
+                    ed_fim = st.text_input(
+                        "Fim (YYYY-MM-DD)",
+                        value=ext_per.get("fim") or "",
+                        key=f"hitl_fim_{caso.id_caso}",
+                    )
+                    ed_emissao = st.text_input(
+                        "Data de emissão (YYYY-MM-DD)",
+                        value=ext.get("data_emissao") or "",
+                        key=f"hitl_emissao_{caso.id_caso}",
+                    )
+                with h_c2:
+                    ed_conselho = st.text_input(
+                        "Conselho (CRM/CRO/CRP)",
+                        value=ext_prof.get("conselho") or "",
+                        key=f"hitl_cons_{caso.id_caso}",
+                    )
+                    ed_numero = st.text_input(
+                        "Número do registro",
+                        value=ext_prof.get("numero") or "",
+                        key=f"hitl_num_{caso.id_caso}",
+                    )
+                    ed_uf = st.text_input(
+                        "UF do profissional",
+                        value=ext_prof.get("uf") or "",
+                        key=f"hitl_uf_{caso.id_caso}",
+                    )
+                    ed_cid = st.text_input(
+                        "CID (opcional)",
+                        value=ext.get("cid") or "",
+                        key=f"hitl_cid_{caso.id_caso}",
+                    )
+                ed_mun = st.text_input(
+                    "Município",
+                    value=ext.get("municipio") or "",
+                    key=f"hitl_mun_{caso.id_caso}",
+                )
+
+                editado = {
+                    "tipo_documento": ext.get("tipo_documento", "atestado_medico"),
+                    "legibilidade": "ok",
+                    "nome_no_documento": ed_nome.strip() or None,
+                    "periodo": {
+                        "inicio": ed_ini.strip() or None,
+                        "fim": ed_fim.strip() or None,
+                    },
+                    "data_emissao": ed_emissao.strip() or None,
+                    "profissional": {
+                        "conselho": ed_conselho.strip() or None,
+                        "numero": ed_numero.strip() or None,
+                        "uf": ed_uf.strip() or None,
+                    },
+                    "cid": ed_cid.strip() or None,
+                    "municipio": ed_mun.strip() or None,
+                }
+                campos_corr = calcular_campos_corrigidos(ext, editado)
+                st.caption(
+                    f"Campos alterados detectados (`campos_corrigidos`): `{campos_corr}` "
+                    f"-> origem esperada: **{'MANUAL' if campos_corr else 'IA'}**"
+                )
+
+                b1, b2 = st.columns(2)
+                with b1:
+                    if st.button("Confirmar / Corrigir (a1.confirmar)", key=f"btn_conf_{caso.id_caso}"):
+                        t_conf = montar_tarefa_confirmar(caso, editado, campos_corr)
+                        troca_conf = cliente.enviar_tarefa(t_conf)
+                        _registrar_troca_no_caso(troca_conf)
+                        st.rerun()
+                with b2:
+                    if st.button("Simular datas inválidas (fim < inicio)", key=f"btn_inv_{caso.id_caso}"):
+                        inv = copy.deepcopy(editado)
+                        inv["periodo"] = {"inicio": "2026-11-11", "fim": "2026-11-09"}
+                        t_inv = montar_tarefa_confirmar(caso, inv, ["periodo.fim"])
+                        troca_inv = cliente.enviar_tarefa(t_inv)
+                        _registrar_troca_no_caso(troca_inv)
+                        st.rerun()
+
+        st.markdown("#### 4. Baixa Física pelo RH (`a1.registrar_baixa_fisica`)")
+        with st.container(border=True):
+            bf1, bf2 = st.columns(2)
+            with bf1:
+                id_at_baixa = st.number_input(
+                    "id_atestado",
+                    min_value=1,
+                    value=int(caso.id_atestado_confirmado or 311),
+                    key=f"baixa_id_{caso.id_caso}",
+                )
+                perfil_baixa = st.selectbox(
+                    "Perfil chamador (teste RBAC)",
+                    options=["rh", "admin", "colaborador"],
+                    key=f"baixa_perfil_{caso.id_caso}",
+                )
+            with bf2:
+                rec_por = st.text_input(
+                    "Recebido por (login ou ID)",
+                    value="rh.ana",
+                    key=f"baixa_por_{caso.id_caso}",
+                )
+                data_baixa = st.text_input(
+                    "Data/hora ISO 8601",
+                    value=datetime.now(UTC).isoformat(),
+                    key=f"baixa_dt_{caso.id_caso}",
+                )
+            usar_aliases = st.checkbox(
+                "Usar aliases Guia v0.7 (`recebido_por` / `data_hora`)",
+                value=False,
+                key=f"baixa_alias_{caso.id_caso}",
+            )
+            if st.button("Registrar Baixa Física", key=f"btn_baixa_{caso.id_caso}"):
+                t_baixa = montar_tarefa_baixa_fisica(
+                    caso,
+                    id_atestado=int(id_at_baixa),
+                    recebido_por=rec_por,
+                    data_hora_iso=data_baixa,
+                    perfil=perfil_baixa,
+                    usar_aliases_v07=usar_aliases,
+                )
+                troca_baixa = cliente.enviar_tarefa(t_baixa)
+                _registrar_troca_no_caso(troca_baixa)
+                st.rerun()
+
+    with col_dir:
+        st.markdown("#### Raio-X do Protocolo `sinergia/1`")
+        st.markdown(
+            renderizar_stepper_estados(
+                caso.estado_atual,
+                caso.aguardando_hitl,
+                caso.baixa_registrada,
+            ),
+            unsafe_allow_html=True,
+        )
+
+        k1, k2, k3 = st.columns(3)
+        with k1:
+            st.markdown(
+                renderizar_card_kpi("Estado", caso.estado_atual, caso.thread_id),
+                unsafe_allow_html=True,
+            )
+        with k2:
+            st.markdown(
+                renderizar_card_kpi(
+                    "id_atestado",
+                    str(caso.id_atestado_confirmado or "—"),
+                    f"Prazo: {caso.prazo_entrega_fisica or '—'}",
+                ),
+                unsafe_allow_html=True,
+            )
+        with k3:
+            st.markdown(
+                renderizar_card_kpi(
+                    "Marcos Legais",
+                    ", ".join(caso.prazos_legais) if caso.prazos_legais else "Nenhum",
+                    f"{len(caso.trocas)} troca(s)",
+                ),
+                unsafe_allow_html=True,
+            )
+
+        if caso.trocas:
+            ultima = caso.trocas[-1]
+            if st.button("🔁 Reenviar último id_mensagem (Idempotência)", key=f"btn_replay_{caso.id_caso}"):
+                replay = cliente.enviar_tarefa(ultima.tarefa, eh_replay=True)
+                st.session_state.painel_ultimo_replay = {
+                    "identico": replay.resultado == ultima.resultado,
+                    "latencia_replay_ms": replay.latencia_ms,
+                    "id_mensagem": ultima.id_mensagem_tarefa,
+                    "resultado_replay": replay.resultado,
+                }
+
+            if st.session_state.painel_ultimo_replay is not None:
+                rep = st.session_state.painel_ultimo_replay
+                if rep["identico"]:
+                    st.success(
+                        f"Idempotência 100% íntegra para `id_mensagem={rep['id_mensagem']}` "
+                        f"(replay em {rep['latencia_replay_ms']} ms)."
+                    )
+                else:
+                    st.error("Divergência detectada no replay idempotente!")
+
+            st.markdown("##### Histórico de Trocas")
+            for idx, troca in enumerate(reversed(caso.trocas), start=1):
+                res = troca.resultado
+                status_res = str(res.get("status", ""))
+                variante = (
+                    "ok"
+                    if status_res == "OK"
+                    else ("aviso" if status_res == "PRECISA_HUMANO" else "erro")
+                )
+                titulo_exp = (
+                    f"#{len(caso.trocas) - idx + 1} · {troca.acao} · "
+                    f"{status_res} ({troca.latencia_ms} ms)"
+                )
+                with st.expander(titulo_exp, expanded=(idx == 1)):
+                    schema_ok = troca.schema_tarefa_valido and troca.schema_resultado_valido
+                    badges = (
+                        renderizar_badge_status(status_res, variante)
+                        + " "
+                        + renderizar_badge_status(
+                            "Schema OK" if schema_ok else "Schema Inválido",
+                            "ok" if schema_ok else "erro",
+                        )
+                    )
+                    if troca.retornou_modelo_pydantic:
+                        badges += " " + renderizar_badge_status("ResultadoA1", "neutro")
+                    st.markdown(badges, unsafe_allow_html=True)
+
+                    if troca.erros_schema:
+                        st.error(" | ".join(troca.erros_schema))
+                    if res.get("decisao"):
+                        st.caption(f"Decisão: `{res['decisao']}`")
+                    if res.get("eventos"):
+                        st.caption(f"Eventos: `{res['eventos']}`")
+
+                    tab_t, tab_r = st.tabs(["TAREFA (A0 -> A1)", "RESULTADO (A1 -> A0)"])
+                    with tab_t:
+                        st.json(troca.tarefa)
+                    with tab_r:
+                        st.json(troca.resultado)
+        else:
+            st.info("Envie uma conversa, documento ou fixture para inspecionar o protocolo `sinergia/1`.")
+
+
+def _renderizar_aba_contratos(
+    cliente: ClienteConexaoA0A1,
+    meta: dict[str, Any],
+) -> None:
+    st.markdown("#### Laboratório de Contratos & Fixtures Oficiais (`Anexo D.2 / F`)")
+    fixtures = carregar_fixtures_oficiais()
+    if not fixtures:
+        st.warning("Nenhuma fixture encontrada em `tests/a1_recepcao/fixtures/`.")
+        return
+
+    c1, c2 = st.columns([1.5, 1.0])
+    with c1:
+        chave_sel = st.selectbox(
+            "Selecione uma fixture oficial",
+            options=list(fixtures.keys()),
+            key="lab_select_fixture",
+        )
+    with c2:
+        if st.button("Rodar todas as 5 fixtures oficiais", key="lab_btn_suite"):
+            relatorio_suite: list[dict[str, Any]] = []
+            for nome_fx, (fx_t, fx_e) in fixtures.items():
+                fx_copia = copy.deepcopy(fx_t)
+                fx_copia["id_mensagem"] = f"lab-suite-{nome_fx}-{datetime.now(UTC).timestamp()}"
+                troca_fx = cliente.enviar_tarefa(fx_copia)
+                diffs_fx = comparar_com_esperado(
+                    troca_fx.resultado,
+                    {**fx_e, "em_resposta_a": fx_copia["id_mensagem"]},
+                    modo_llm=meta["modo_llm"],
+                )
+                relatorio_suite.append(
+                    {
+                        "fixture": nome_fx,
+                        "status": troca_fx.resultado.get("status"),
+                        "schema_ok": troca_fx.schema_resultado_valido,
+                        "latencia_ms": troca_fx.latencia_ms,
+                        "divergencias": diffs_fx,
+                    }
+                )
+            st.session_state.painel_suite_fixtures = relatorio_suite
+
+    if st.session_state.painel_suite_fixtures is not None:
+        st.dataframe(st.session_state.painel_suite_fixtures, use_container_width=True)
+
+    tarefa_fx, esperado_fx = fixtures[chave_sel]
+    col_ed, col_esp = st.columns(2)
+    with col_ed:
+        json_editado = st.text_area(
+            "Envelope TAREFA editável (JSON)",
+            value=json.dumps(tarefa_fx, ensure_ascii=False, indent=2),
+            height=380,
+            key=f"lab_editor_{chave_sel}",
+        )
+        if st.button("Validar e Executar TAREFA", key="lab_btn_exec"):
+            try:
+                tarefa_dict = json.loads(json_editado)
+            except json.JSONDecodeError as exc:
+                st.error(f"JSON inválido: {exc}")
+            else:
+                ok_t, errs_t = validar_envelope_sinergia(tarefa_dict, "TarefaA1")
+                troca = cliente.enviar_tarefa(tarefa_dict)
+                diffs = comparar_com_esperado(
+                    troca.resultado,
+                    {**esperado_fx, "em_resposta_a": tarefa_dict.get("id_mensagem")},
+                    modo_llm=meta["modo_llm"],
+                )
+                st.session_state.painel_resultado_fixture = {
+                    "ok_tarefa": ok_t,
+                    "erros_tarefa": errs_t,
+                    "troca": troca.model_dump(mode="json"),
+                    "diffs_esperado": diffs,
+                }
+    with col_esp:
+        st.markdown("**RESULTADO esperado (`.esperado.json`)**")
+        st.json(esperado_fx)
+
+    if st.session_state.painel_resultado_fixture is not None:
+        res_fx = st.session_state.painel_resultado_fixture
+        st.markdown("##### Resultado Obtido")
+        if res_fx["diffs_esperado"]:
+            st.warning("Diferenças vs `.esperado.json`: " + "; ".join(res_fx["diffs_esperado"]))
+        else:
+            st.success("RESULTADO 100% compatível com o `.esperado.json`!")
+        st.json(res_fx["troca"]["resultado"])
+
+
+def _renderizar_aba_inspetor(cliente: ClienteConexaoA0A1) -> None:
+    st.markdown("#### Inspetor das 5 Tabelas `afastamento.*` & Governança LGPD (Art. 11)")
+    perfil_visao: PerfilInspecao = st.radio(
+        "Simular visão de acesso ao banco (RLS)",
+        options=["A1_RH", "GESTOR_A2"],
+        horizontal=True,
+        format_func=lambda p: (
+            "Perfil A1 / RH (acesso completo + cid_restrito)"
+            if p == "A1_RH"
+            else "Perfil Gestor / A2 (vw_atestado_sem_cid + RLS bloqueia cid_restrito)"
+        ),
+        key="insp_perfil_rls",
+    )
+
+    tabelas = cliente.inspecionar_tabelas_afastamento(perfil_acesso=perfil_visao)
+    if perfil_visao == "GESTOR_A2":
+        st.info(
+            "Visão LGPD Art. 11 ativa: coluna `codigo_cid` removida e tabela "
+            "`afastamento.cid_restrito` isolada por RLS."
+        )
+
+    nomes = (
+        ("atestado", "1. afastamento.atestado"),
+        ("atestado_arquivo", "2. afastamento.atestado_arquivo (SHA-256)"),
+        ("atestado_campo", "3. afastamento.atestado_campo (IA vs MANUAL)"),
+        ("baixa_fisica", "4. afastamento.baixa_fisica"),
+        ("cid_restrito", "5. afastamento.cid_restrito (RLS Art. 11)"),
+    )
+    for chave, titulo in nomes:
+        registros = tabelas.get(chave, [])
+        with st.expander(f"{titulo} ({len(registros)} registro(s))", expanded=(chave in {"atestado", "cid_restrito"})):
+            if registros:
+                st.dataframe(registros, use_container_width=True)
+            else:
+                st.caption("Nenhum registro visível para este perfil.")
+
+
+def _renderizar_aba_diagnostico_e_metricas(meta: dict[str, Any]) -> None:
+    cfg: A1Config = meta["config"]
+    st.markdown("#### Diagnóstico Pré-Voo (Ambiente A0 ↔ A1)")
+
+    d1, d2, d3 = st.columns([1.4, 1.4, 1.0])
+    with d1:
+        url_a1_diag = st.text_input(
+            "URL HTTP A1 para diagnóstico", value="http://localhost:8001", key="diag_url_a1"
+        )
+    with d2:
+        url_a0_diag = st.text_input(
+            "URL HTTP A0 para diagnóstico (opcional)", value="", key="diag_url_a0"
+        )
+    with d3:
+        testar_groq = st.checkbox("Testar ping real na Groq", value=False, key="diag_ping_groq")
+
+    if st.button("Executar Diagnóstico Completo", key="diag_btn_run"):
+        st.session_state.painel_diagnostico = executar_diagnostico_completo(
+            config=cfg,
+            url_a1_http=url_a1_diag,
+            url_a0_http=url_a0_diag,
+            testar_groq_rede=testar_groq,
+        )
+
+    itens_diag: list[ItemDiagnostico] = st.session_state.painel_diagnostico
+    if itens_diag:
+        for item in itens_diag:
+            with st.container(border=True):
+                st.markdown(
+                    f"{renderizar_badge_status(item.status.upper(), item.status)} **{item.nome}** — {item.resumo}",
+                    unsafe_allow_html=True,
+                )
+                if item.detalhes:
+                    with st.expander("Detalhes técnicos"):
+                        st.json(item.detalhes)
+
+    st.divider()
+    st.markdown("#### Avaliador Oficial das Métricas da Seção 10 (Task 3.2)")
+    m1, m2 = st.columns(2)
+    with m1:
+        modo_eval = st.radio(
+            "Modo de LLM da bateria",
+            options=["mock", "groq"],
+            horizontal=True,
+            key="eval_modo_llm",
+        )
+    with m2:
+        fmts_eval = st.multiselect(
+            "Formatos avaliados",
+            options=["png", "pdf"],
+            default=["png", "pdf"],
+            key="eval_formatos",
+        )
+
+    if st.button("Executar Bateria da Seção 10", key="eval_btn_run"):
+        if not fmts_eval:
+            st.error("Selecione ao menos um formato ('png' ou 'pdf').")
+        else:
+            with st.spinner("Executando bateria completa de métricas da Seção 10..."):
+                st.session_state.painel_metricas_sec10 = avaliar_metricas_task_32(
+                    cfg=cfg,
+                    modo_llm=modo_eval,  # type: ignore[arg-type]
+                    formatos=tuple(fmts_eval),  # type: ignore[arg-type]
+                )
+
+    rel = st.session_state.painel_metricas_sec10
+    if rel is not None:
+        c_k1, c_k2, c_k3, c_k4 = st.columns(4)
+        with c_k1:
+            st.markdown(
+                renderizar_card_kpi(
+                    "Extração Bruta Exata",
+                    f"{rel['taxa_extracao_bruta_exata_pct']:.1f}%",
+                    f"{rel['legiveis_exatos']}/{rel['legiveis_execucoes_total']} (meta >= 80%)",
+                ),
+                unsafe_allow_html=True,
+            )
+        with c_k2:
+            st.markdown(
+                renderizar_card_kpi(
+                    "Confirmados IA Direta",
+                    f"{rel['taxa_confirmados_origem_ia_pct']:.1f}%",
+                    f"{rel['confirmados_origem_ia']}/{rel['confirmados_total']}",
+                ),
+                unsafe_allow_html=True,
+            )
+        with c_k3:
+            st.markdown(
+                renderizar_card_kpi(
+                    "Rejeição Ilegíveis",
+                    f"{rel['taxa_rejeicao_ilegiveis_pct']:.1f}%",
+                    f"{rel['ilegiveis_rejeitados']}/{rel['ilegiveis_execucoes_total']} (0 BD)",
+                ),
+                unsafe_allow_html=True,
+            )
+        with c_k4:
+            st.markdown(
+                renderizar_card_kpi(
+                    "Baixa Física no Prazo",
+                    f"{rel['taxa_baixa_nominal_pct']:.1f}%",
+                    f"Estendido: {rel['cenario_estendido_baixa']['taxa_no_prazo_pct']:.1f}% (meta >= 90%)",
+                ),
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("##### Acurácia por Campo (`AtestadoExtraido`)")
+        linhas_campos = [
+            {
+                "campo": campo,
+                "acertos": info["acertos"],
+                "total": info["total"],
+                "taxa_pct": info["taxa_pct"],
+            }
+            for campo, info in rel["acuracia_por_campo"].items()
+        ]
+        st.dataframe(linhas_campos, use_container_width=True)
+
+
+def main() -> None:
+    """Ponto de entrada da aplicação Streamlit de homologação A0 <-> A1."""
+    st.set_page_config(
+        page_title="SinergIA — Painel de Integração A0 ↔ A1",
+        page_icon="🩺",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+    aplicar_estilo_painel()
+    _inicializar_estado()
+
+    st.markdown(
+        '<h1 class="sinergia-painel-titulo">SinergIA — Painel de Configuração e Homologação A0 ↔ A1</h1>'
+        '<p class="sinergia-painel-sub">'
+        "Simulação em tempo real do protocolo <code>sinergia/1</code>, pausa humana HITL, "
+        "inspeção das 5 tabelas v0.7 (LGPD Art. 11) e diagnóstico pré-voo."
+        "</p>",
+        unsafe_allow_html=True,
+    )
+
+    cliente, meta = _renderizar_sidebar()
+
+    aba_sim, aba_contratos, aba_insp, aba_diag = st.tabs(
+        [
+            "💬 Simulador A0 ↔ A1 (HITL)",
+            "🧪 Contratos & Fixtures (sinergia/1)",
+            "🗄️ Inspetor de Tabelas (5 Tabelas v0.7 + LGPD)",
+            "🩺 Diagnóstico Pré-Voo & Métricas (Seção 10)",
+        ]
+    )
+    with aba_sim:
+        _renderizar_aba_simulador(cliente, meta)
+    with aba_contratos:
+        _renderizar_aba_contratos(cliente, meta)
+    with aba_insp:
+        _renderizar_aba_inspetor(cliente)
+    with aba_diag:
+        _renderizar_aba_diagnostico_e_metricas(meta)
+
+
+if __name__ == "__main__":
+    main()
