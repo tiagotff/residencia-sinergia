@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import quote
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 
 from sinergia.agentes.a1_recepcao.config import obter_config_a1
 from sinergia.agentes.a1_recepcao.extrator_llm import MockLLM
@@ -72,6 +73,11 @@ def criar_app_a1(agente: ServicoA1 | None = None) -> FastAPI:
     def health() -> dict[str, str]:
         modo_repo, modo_llm = _ler_modos_ambiente()
         cfg = obter_config_a1()
+        who_ativo = (
+            cfg.who_icd_enabled
+            and bool(cfg.who_icd_client_id.strip())
+            and bool(cfg.who_icd_client_secret.strip())
+        )
         return {
             "status": "ok",
             "agente": "A1",
@@ -79,11 +85,38 @@ def criar_app_a1(agente: ServicoA1 | None = None) -> FastAPI:
             "modo_repositorio": modo_repo
             or ("postgres" if cfg.database_url.strip() else "memoria"),
             "modo_llm": modo_llm or ("groq" if cfg.groq_api_key.strip() else "nao_configurado"),
+            "who_icd_api": "ativa" if who_ativo else "somente_banco",
         }
 
     @app_a1.post("/executar", response_model=ResultadoA1)
-    def executar_endpoint(tarefa: TarefaA1) -> dict[str, Any]:
-        return _obter_agente().executar(tarefa)
+    def executar_endpoint(tarefa: TarefaA1, response: Response) -> dict[str, Any]:
+        agente_ativo = _obter_agente()
+        resultado = agente_ativo.executar(tarefa)
+        diag_cid = getattr(agente_ativo, "ultimo_diagnostico_cid", None)
+        if isinstance(diag_cid, dict):
+            if diag_cid.get("origem"):
+                response.headers["X-Sinergia-Cid-Origem"] = str(diag_cid["origem"])
+            if diag_cid.get("codigo_cid"):
+                response.headers["X-Sinergia-Cid-Codigo"] = str(diag_cid["codigo_cid"])
+            if diag_cid.get("descricao"):
+                response.headers["X-Sinergia-Cid-Descricao"] = quote(
+                    str(diag_cid["descricao"]), safe=""
+                )
+            if diag_cid.get("capitulo"):
+                response.headers["X-Sinergia-Cid-Capitulo"] = quote(
+                    str(diag_cid["capitulo"]), safe=""
+                )
+            if diag_cid.get("versao_cid"):
+                response.headers["X-Sinergia-Cid-Versao"] = str(diag_cid["versao_cid"])
+            if diag_cid.get("valido") is not None:
+                response.headers["X-Sinergia-Cid-Valido"] = str(
+                    bool(diag_cid["valido"])
+                ).lower()
+            if diag_cid.get("detalhe"):
+                response.headers["X-Sinergia-Cid-Detalhe"] = quote(
+                    str(diag_cid["detalhe"])[:200], safe=""
+                )
+        return resultado
 
     return app_a1
 

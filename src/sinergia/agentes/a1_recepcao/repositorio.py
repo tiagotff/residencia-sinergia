@@ -19,8 +19,7 @@ Fornece duas implementações aderentes ao mesmo `Protocol`:
 from __future__ import annotations
 
 import unicodedata
-from collections.abc import Collection, Sequence
-from contextlib import nullcontext
+from collections.abc import Collection, Mapping, Sequence
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Protocol, Self, runtime_checkable
 
@@ -305,7 +304,7 @@ class RepositorioA1Protocol(Protocol):
     def obter_atestado(self, id_atestado: int) -> RegistroAtestadoDB | None: ...
 
     def obter_ultimo_atestado_pendente(
-        self, id_colaborador: int
+        self, id_colaborador: int, *, id_caso: int | None = None
     ) -> RegistroAtestadoDB | None: ...
 
     def confirmar_atestado_no_banco(
@@ -411,6 +410,126 @@ def _somar_dias_janela_60d(
     return len(dias_cobertos)
 
 
+class _CursorDictAdapter:
+    """Normaliza cursores DB-API/psycopg para sempre retornar linhas como `dict`."""
+
+    def __init__(self, cursor: Any) -> None:
+        self._cursor = cursor
+
+    def __enter__(self) -> Self:
+        if hasattr(self._cursor, "__enter__"):
+            self._cursor.__enter__()
+        return self
+
+    def __exit__(self, *args: object) -> Any:
+        if hasattr(self._cursor, "__exit__"):
+            return self._cursor.__exit__(*args)
+        if hasattr(self._cursor, "close"):
+            self._cursor.close()
+        return None
+
+    @property
+    def description(self) -> Any:
+        return getattr(self._cursor, "description", None)
+
+    def execute(self, *args: Any, **kwargs: Any) -> Any:
+        return self._cursor.execute(*args, **kwargs)
+
+    def _converter_linha(self, row: Any) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            return row
+        if isinstance(row, Mapping):
+            return dict(row)
+        desc = getattr(self._cursor, "description", None)
+        if desc:
+            colunas = [
+                col.name if hasattr(col, "name") else col[0] for col in desc
+            ]
+            return dict(zip(colunas, row, strict=True))
+        raise TypeError(
+            f"Linha de cursor incompatível com mapeamento por nome de coluna: {type(row)!r}"
+        )
+
+    def fetchone(self) -> dict[str, Any] | None:
+        return self._converter_linha(self._cursor.fetchone())
+
+    def fetchall(self) -> list[dict[str, Any]]:
+        linhas = self._cursor.fetchall()
+        convertidas: list[dict[str, Any]] = []
+        for linha in linhas:
+            item = self._converter_linha(linha)
+            if item is not None:
+                convertidas.append(item)
+        return convertidas
+
+    def __getattr__(self, nome: str) -> Any:
+        return getattr(self._cursor, nome)
+
+
+def _extrair_raw_conn_sqlalchemy(sa_conn: Any) -> Any:
+    """Obtém a conexão DB-API subjacente de uma Connection SQLAlchemy."""
+    if callable(getattr(sa_conn, "cursor", None)):
+        return sa_conn
+    for attr in ("dbapi_connection", "connection"):
+        candidato = getattr(sa_conn, attr, None)
+        if candidato is not None and callable(getattr(candidato, "cursor", None)):
+            return candidato
+    raise TypeError(
+        "Objeto SQLAlchemy sem conexão DB-API com método .cursor()."
+    )
+
+
+class _ConexaoAdaptada:
+    """Adapta conexões psycopg/DB-API, SQLAlchemy Session/Connection ou Engine."""
+
+    def __init__(self, alvo: Any) -> None:
+        self._alvo = alvo
+        self._raw_checked_out: Any | None = None
+        self._modo_engine = False
+
+    def __enter__(self) -> Self:
+        if callable(getattr(self._alvo, "cursor", None)):
+            return self
+        if callable(getattr(self._alvo, "raw_connection", None)):
+            self._raw_checked_out = self._alvo.raw_connection()
+            self._modo_engine = True
+            return self
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        if self._modo_engine and self._raw_checked_out is not None:
+            if hasattr(self._raw_checked_out, "close"):
+                self._raw_checked_out.close()
+            self._raw_checked_out = None
+
+    def cursor(self) -> _CursorDictAdapter:
+        if callable(getattr(self._alvo, "cursor", None)):
+            return _CursorDictAdapter(self._alvo.cursor())
+        if self._modo_engine and self._raw_checked_out is not None:
+            return _CursorDictAdapter(self._raw_checked_out.cursor())
+        if callable(getattr(self._alvo, "connection", None)):
+            sa_conn = self._alvo.connection()
+            raw_conn = _extrair_raw_conn_sqlalchemy(sa_conn)
+            return _CursorDictAdapter(raw_conn.cursor())
+        if hasattr(self._alvo, "connection") or hasattr(self._alvo, "dbapi_connection"):
+            raw_conn = _extrair_raw_conn_sqlalchemy(self._alvo)
+            return _CursorDictAdapter(raw_conn.cursor())
+        raise TypeError(
+            "Conexão de banco incompatível com RepositorioA1Postgres: "
+            f"{type(self._alvo)!r}."
+        )
+
+    def commit(self) -> None:
+        if self._modo_engine and self._raw_checked_out is not None:
+            if hasattr(self._raw_checked_out, "commit"):
+                self._raw_checked_out.commit()
+            return
+        if callable(getattr(self._alvo, "commit", None)):
+            self._alvo.commit()
+
+
 class RepositorioA1Postgres:
     """Repositório PostgreSQL 16 estritamente restrito às tabelas do Anexo C.2."""
 
@@ -426,7 +545,7 @@ class RepositorioA1Postgres:
 
     def _conectar(self) -> Any:
         if self._conn is not None:
-            return nullcontext(self._conn)
+            return _ConexaoAdaptada(self._conn)
         return psycopg.connect(self._database_url, row_factory=dict_row)
 
     def conferir_colaborador_ativo(
@@ -1110,17 +1229,55 @@ class RepositorioA1Postgres:
             return RegistroAtestadoDB(**row) if row is not None else None
 
     def obter_ultimo_atestado_pendente(
-        self, id_colaborador: int
+        self, id_colaborador: int, *, id_caso: int | None = None
     ) -> RegistroAtestadoDB | None:
-        sql = """
-            SELECT *
-            FROM afastamento.atestado
-            WHERE id_colaborador = %s AND status = 'PENDENTE'
-            ORDER BY postado_em DESC, id_atestado DESC
-            LIMIT 1
-        """
         with self._conectar() as conn, conn.cursor() as cur:
-            cur.execute(sql, (id_colaborador,))
+            if id_caso is not None:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM afastamento.atestado
+                    WHERE id_colaborador = %s
+                      AND id_caso = %s
+                      AND status = 'PENDENTE'
+                    ORDER BY postado_em DESC, id_atestado DESC
+                    LIMIT 1
+                    """,
+                    (id_colaborador, id_caso),
+                )
+                row = cur.fetchone()
+                if row is not None:
+                    return RegistroAtestadoDB(**row)
+
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM afastamento.atestado
+                    WHERE id_colaborador = %s
+                      AND id_caso IS NULL
+                      AND status = 'PENDENTE'
+                    ORDER BY postado_em DESC, id_atestado DESC
+                    LIMIT 1
+                    """,
+                    (id_colaborador,),
+                )
+                row_legado = cur.fetchone()
+                return (
+                    RegistroAtestadoDB(**row_legado)
+                    if row_legado is not None
+                    else None
+                )
+
+            cur.execute(
+                """
+                SELECT *
+                FROM afastamento.atestado
+                WHERE id_colaborador = %s AND status = 'PENDENTE'
+                ORDER BY postado_em DESC, id_atestado DESC
+                LIMIT 1
+                """,
+                (id_colaborador,),
+            )
             row = cur.fetchone()
             return RegistroAtestadoDB(**row) if row is not None else None
 
@@ -1908,8 +2065,36 @@ class RepositorioA1Memoria:
         return reg.model_copy(deep=True) if reg is not None else None
 
     def obter_ultimo_atestado_pendente(
-        self, id_colaborador: int
+        self, id_colaborador: int, *, id_caso: int | None = None
     ) -> RegistroAtestadoDB | None:
+        if id_caso is not None:
+            pendentes_caso = [
+                at
+                for at in self.atestados.values()
+                if at.id_colaborador == id_colaborador
+                and at.id_caso == id_caso
+                and at.status == "PENDENTE"
+            ]
+            if pendentes_caso:
+                pendentes_caso.sort(
+                    key=lambda at: (at.postado_em, at.id_atestado), reverse=True
+                )
+                return pendentes_caso[0].model_copy(deep=True)
+
+            pendentes_legados = [
+                at
+                for at in self.atestados.values()
+                if at.id_colaborador == id_colaborador
+                and at.id_caso is None
+                and at.status == "PENDENTE"
+            ]
+            if not pendentes_legados:
+                return None
+            pendentes_legados.sort(
+                key=lambda at: (at.postado_em, at.id_atestado), reverse=True
+            )
+            return pendentes_legados[0].model_copy(deep=True)
+
         pendentes = [
             at
             for at in self.atestados.values()

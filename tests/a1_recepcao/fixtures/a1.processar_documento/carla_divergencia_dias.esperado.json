@@ -27,7 +27,8 @@
       "profissional": {
         "conselho": "CRM",
         "numero": "123456",
-        "uf": "SP"
+        "uf": "SP",
+        "nome": "Dr. Marcos Lima"
       },
       "cid": null,
       "municipio": "Campinas",
@@ -39,12 +40,144 @@
         "no_documento": 3,
         "informado": 5
       }
-    ]
+    ],
+    "revisao_colaborador": {
+      "titulo": "Atenção: divergências encontradas — valide os dados",
+      "instrucao_colaborador": "Confira abaixo as informações lidas no seu documento. Confirme se está tudo certo ou informe o que precisa alterar.",
+      "legibilidade": "ok",
+      "resumo_markdown": "**Dados lidos no documento:**\n- **Tipo:** Atestado médico\n- **Paciente:** Carla Souza\n- **Período:** 09/11/2026 a 11/11/2026 (3 dia(s))\n- **Emissão:** 09/11/2026\n- **Profissional:** CRM/SP 123456\n- **Município:** Campinas",
+      "itens": [
+        {
+          "campo": "tipo_documento",
+          "rotulo": "Tipo de documento",
+          "valor_lido": "atestado_medico",
+          "valor_exibicao": "Atestado médico",
+          "valor_informado_antes": null,
+          "confianca": null,
+          "status": "lido_ok",
+          "editavel": true,
+          "obrigatorio": true
+        },
+        {
+          "campo": "nome_no_documento",
+          "rotulo": "Paciente no documento",
+          "valor_lido": "Carla Souza",
+          "valor_exibicao": "Carla Souza",
+          "valor_informado_antes": null,
+          "confianca": 0.96,
+          "status": "lido_ok",
+          "editavel": true,
+          "obrigatorio": false
+        },
+        {
+          "campo": "periodo.inicio",
+          "rotulo": "Início do afastamento",
+          "valor_lido": "2026-11-09",
+          "valor_exibicao": "09/11/2026",
+          "valor_informado_antes": null,
+          "confianca": 0.96,
+          "status": "lido_ok",
+          "editavel": true,
+          "obrigatorio": true
+        },
+        {
+          "campo": "periodo.fim",
+          "rotulo": "Término do afastamento",
+          "valor_lido": "2026-11-11",
+          "valor_exibicao": "11/11/2026",
+          "valor_informado_antes": null,
+          "confianca": 0.95,
+          "status": "lido_ok",
+          "editavel": true,
+          "obrigatorio": true
+        },
+        {
+          "campo": "periodo.dias",
+          "rotulo": "Duração",
+          "valor_lido": 3,
+          "valor_exibicao": "3 dia(s)",
+          "valor_informado_antes": 5,
+          "confianca": 0.95,
+          "status": "divergente",
+          "editavel": false,
+          "obrigatorio": true
+        },
+        {
+          "campo": "data_emissao",
+          "rotulo": "Data de emissão",
+          "valor_lido": "2026-11-09",
+          "valor_exibicao": "09/11/2026",
+          "valor_informado_antes": null,
+          "confianca": 0.95,
+          "status": "lido_ok",
+          "editavel": true,
+          "obrigatorio": false
+        },
+        {
+          "campo": "profissional.conselho",
+          "rotulo": "Conselho profissional",
+          "valor_lido": "CRM",
+          "valor_exibicao": "CRM",
+          "valor_informado_antes": null,
+          "confianca": 0.97,
+          "status": "lido_ok",
+          "editavel": true,
+          "obrigatorio": false
+        },
+        {
+          "campo": "profissional.numero",
+          "rotulo": "Número do registro",
+          "valor_lido": "123456",
+          "valor_exibicao": "123456",
+          "valor_informado_antes": null,
+          "confianca": 0.97,
+          "status": "lido_ok",
+          "editavel": true,
+          "obrigatorio": false
+        },
+        {
+          "campo": "profissional.uf",
+          "rotulo": "UF do registro",
+          "valor_lido": "SP",
+          "valor_exibicao": "SP",
+          "valor_informado_antes": null,
+          "confianca": 0.97,
+          "status": "lido_ok",
+          "editavel": true,
+          "obrigatorio": false
+        },
+        {
+          "campo": "profissional.nome",
+          "rotulo": "Nome do profissional",
+          "valor_lido": "Dr. Marcos Lima",
+          "valor_exibicao": "Dr. Marcos Lima",
+          "valor_informado_antes": null,
+          "confianca": 0.95,
+          "status": "lido_ok",
+          "editavel": true,
+          "obrigatorio": false
+        },
+        {
+          "campo": "municipio",
+          "rotulo": "Município de emissão",
+          "valor_lido": "Campinas",
+          "valor_exibicao": "Campinas",
+          "valor_informado_antes": null,
+          "confianca": 0.94,
+          "status": "lido_ok",
+          "editavel": true,
+          "obrigatorio": false
+        }
+      ],
+      "permite_confirmar_direto": true,
+      "permite_editar": true,
+      "requer_novo_arquivo": false
+    }
   },
   "saidas": [
     {
       "tipo": "mensagem",
-      "texto": "Li no atestado 3 dias (09/11 a 11/11), mas você informou 5. Qual está certo?"
+      "texto": "Li no atestado 3 dias (09/11 a 11/11), mas você informou 5. Qual está certo?\n\n**Dados lidos no documento:**\n- **Tipo:** Atestado médico\n- **Paciente:** Carla Souza\n- **Período:** 09/11/2026 a 11/11/2026 (3 dia(s))\n- **Emissão:** 09/11/2026\n- **Profissional:** CRM/SP 123456\n- **Município:** Campinas\n\nConfirme se os dados acima estão corretos ou informe o que deseja alterar."
     }
   ],
   "eventos": [

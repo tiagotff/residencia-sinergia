@@ -65,6 +65,7 @@ from sinergia.agentes.a1_recepcao.schemas import (
 )
 from sinergia.agentes.a1_recepcao.validador import (
     cid_sintaxe_valida,
+    construir_quadro_revisao_atestado,
     detectar_divergencias,
     gerar_mensagem_confirmacao_extracao,
     mesclar_atestado_confirmado,
@@ -682,30 +683,33 @@ class ServicoA1:
     def _resposta_duplicada(
         self, tarefa: TarefaA1, duplicado: RegistroAtestadoDB
     ) -> ResultadoA1:
-        atestado_dup = AtestadoExtraido(
-            legibilidade="ok",
-            periodo=PeriodoAfastamento(
-                inicio=duplicado.inicio_afastamento.date(),
-                fim=duplicado.fim_afastamento.date(),
-            ),
-            data_emissao=duplicado.data_emissao,
-            cid=duplicado.codigo_cid,
+        atestado_dup = _reconstruir_base_de_pendente(
+            duplicado, repositorio=self.repositorio
         )
+        quadro_dup = construir_quadro_revisao_atestado(
+            atestado_dup,
+            [],
+            politica_extrair_cid=self.config.politica_extrair_cid,
+        )
+        payload_dup = {
+            "atestado_extraido": _formatar_atestado_payload(atestado_dup),
+            "divergencias": [],
+            "revisao_colaborador": quadro_dup.model_dump(mode="json"),
+        }
+        PayloadProcessarDocumentoResultado.model_validate(payload_dup)
         return ResultadoA1.a_partir_da_tarefa(
             tarefa,
             status="PRECISA_HUMANO",
             estado_proposto="RECEBIDO",
-            payload={
-                "atestado_extraido": _formatar_atestado_payload(atestado_dup),
-                "divergencias": [],
-            },
+            payload=payload_dup,
             saidas=[
                 SaidaMensagem(
                     tipo="mensagem",
                     texto=(
                         "Este arquivo de atestado já foi recebido anteriormente "
                         f"(registro #{duplicado.id_atestado}). Deseja confirmar "
-                        "os dados ou enviar outro documento?"
+                        "os dados ou enviar outro documento?\n\n"
+                        f"{quadro_dup.resumo_markdown}"
                     ),
                 )
             ],
@@ -750,18 +754,30 @@ class ServicoA1:
         )
 
         if extraido.legibilidade == "ilegivel":
+            quadro_ilegivel = construir_quadro_revisao_atestado(
+                extraido,
+                [],
+                politica_extrair_cid=self.config.politica_extrair_cid,
+            )
+            payload_ileg = {
+                "atestado_extraido": _formatar_atestado_payload(extraido),
+                "divergencias": [],
+                "revisao_colaborador": quadro_ilegivel.model_dump(mode="json"),
+            }
+            PayloadProcessarDocumentoResultado.model_validate(payload_ileg)
             resultado = ResultadoA1.a_partir_da_tarefa(
                 tarefa,
                 status="PRECISA_HUMANO",
                 estado_proposto="NOVO",
-                payload={
-                    "atestado_extraido": _formatar_atestado_payload(extraido),
-                    "divergencias": [],
-                },
+                payload=payload_ileg,
                 saidas=[
                     SaidaMensagem(
                         tipo="mensagem",
-                        texto=gerar_mensagem_confirmacao_extracao(extraido, []),
+                        texto=gerar_mensagem_confirmacao_extracao(
+                            extraido,
+                            [],
+                            politica_extrair_cid=self.config.politica_extrair_cid,
+                        ),
                     )
                 ],
                 eventos=[],
@@ -853,9 +869,15 @@ class ServicoA1:
             )
         decisao_final = decisao.model_copy(update={"motivo": motivo_decisao})
 
+        quadro_revisao = construir_quadro_revisao_atestado(
+            extraido,
+            divergencias,
+            politica_extrair_cid=self.config.politica_extrair_cid,
+        )
         payload_dict = {
             "atestado_extraido": _formatar_atestado_payload(extraido),
             "divergencias": [d.model_dump(mode="json") for d in divergencias],
+            "revisao_colaborador": quadro_revisao.model_dump(mode="json"),
         }
         PayloadProcessarDocumentoResultado.model_validate(payload_dict)
 
@@ -871,7 +893,11 @@ class ServicoA1:
             saidas=[
                 SaidaMensagem(
                     tipo="mensagem",
-                    texto=gerar_mensagem_confirmacao_extracao(extraido, divergencias),
+                    texto=gerar_mensagem_confirmacao_extracao(
+                        extraido,
+                        divergencias,
+                        politica_extrair_cid=self.config.politica_extrair_cid,
+                    ),
                 )
             ],
             eventos=[EventoEmitido(tipo="atestado.extraido", dados=dados_evento)],
@@ -889,7 +915,9 @@ class ServicoA1:
         )
 
         base_extraida = self._obter_extracao_pendente(tarefa)
-        pendente_db = self.repositorio.obter_ultimo_atestado_pendente(id_colaborador)
+        pendente_db = self.repositorio.obter_ultimo_atestado_pendente(
+            id_colaborador, id_caso=id_caso
+        )
         if base_extraida is None and pendente_db is not None:
             base_extraida = _reconstruir_base_de_pendente(
                 pendente_db, repositorio=self.repositorio
@@ -1235,6 +1263,10 @@ class ServicoA1:
             self._cache_idempotencia[tarefa_obj.id_mensagem] = copy.deepcopy(serializado)
             return serializado
 
+    def executar_modelo(self, tarefa: dict[str, Any] | TarefaA1) -> ResultadoA1:
+        """Executa uma `TAREFA` e devolve o envelope validado como `ResultadoA1`."""
+        return ResultadoA1.model_validate(self.executar(tarefa))
+
 
 class AgenteA1(ServicoA1):
     """Alias oficial do Guia A1 v0.7 (`AgenteA1(db=sessao, llm=cliente_groq)`)."""
@@ -1250,6 +1282,7 @@ class AgenteA1(ServicoA1):
         cache_idempotencia: Any | None = None,
         extracoes_pendentes: dict[tuple[str | int, int, int | None], AtestadoExtraido]
         | None = None,
+        retornar_modelo: bool = False,
     ) -> None:
         cfg = config or obter_config_a1()
         repo_final: RepositorioA1Protocol | None
@@ -1262,6 +1295,7 @@ class AgenteA1(ServicoA1):
         else:
             repo_final = RepositorioA1Postgres(cfg.database_url, conn=db)
 
+        self._retornar_modelo = retornar_modelo
         super().__init__(
             repositorio=repo_final,
             llm=llm,
@@ -1270,6 +1304,14 @@ class AgenteA1(ServicoA1):
             cache_idempotencia=cache_idempotencia,
             extracoes_pendentes=extracoes_pendentes,
         )
+
+    def executar(
+        self, tarefa: dict[str, Any] | TarefaA1
+    ) -> dict[str, Any] | ResultadoA1:
+        resultado = super().executar(tarefa)
+        if self._retornar_modelo:
+            return ResultadoA1.model_validate(resultado)
+        return resultado
 
 
 def executar(
@@ -1290,3 +1332,23 @@ def executar(
         extracoes_pendentes=_EXTRACOES_PENDENTES_MODULO,
     )
     return servico.executar(tarefa)
+
+
+def executar_modelo(
+    tarefa: dict[str, Any] | TarefaA1,
+    *,
+    repositorio: RepositorioA1Protocol | None = None,
+    llm: Any | None = None,
+    config: A1Config | None = None,
+    cliente_cid: ClienteCidProtocol | None = None,
+) -> ResultadoA1:
+    """Versão tipada de `executar(tarefa)` que retorna `ResultadoA1`."""
+    return ResultadoA1.model_validate(
+        executar(
+            tarefa,
+            repositorio=repositorio,
+            llm=llm,
+            config=config,
+            cliente_cid=cliente_cid,
+        )
+    )

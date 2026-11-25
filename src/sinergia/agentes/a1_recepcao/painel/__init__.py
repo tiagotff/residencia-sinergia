@@ -1,0 +1,61 @@
+"""Painel Streamlit de configuração, simulação e homologação A0 <-> A1."""
+
+from sinergia.agentes.a1_recepcao.painel.cliente_conexao import (
+    ClienteConexaoA0A1,
+    RegistroTrocaProtocolo,
+    validar_envelope_sinergia,
+)
+from sinergia.agentes.a1_recepcao.painel.diagnostico import (
+    ItemDiagnostico,
+    executar_diagnostico_completo,
+    verificar_catalogo_sintetico,
+    verificar_endpoint_http,
+    verificar_groq_ping,
+    verificar_postgresql,
+    verificar_variaveis_env,
+    verificar_who_icd_api,
+)
+from sinergia.agentes.a1_recepcao.painel.emulador_a0 import (
+    EstadoCasoSimulado,
+    aplicar_resultado_ao_caso,
+    calcular_campos_corrigidos,
+    carregar_fixtures_oficiais,
+    comparar_com_esperado,
+    criar_caso_padrao,
+    gerar_preview_documento_png,
+    limpar_uploads_temporarios,
+    montar_tarefa_baixa_fisica,
+    montar_tarefa_confirmar,
+    montar_tarefa_conversar,
+    montar_tarefa_processar_documento,
+    resumir_diff_edicao,
+    salvar_upload_temporario,
+)
+
+__all__ = [
+    "ClienteConexaoA0A1",
+    "EstadoCasoSimulado",
+    "ItemDiagnostico",
+    "RegistroTrocaProtocolo",
+    "aplicar_resultado_ao_caso",
+    "calcular_campos_corrigidos",
+    "carregar_fixtures_oficiais",
+    "comparar_com_esperado",
+    "criar_caso_padrao",
+    "executar_diagnostico_completo",
+    "gerar_preview_documento_png",
+    "limpar_uploads_temporarios",
+    "montar_tarefa_baixa_fisica",
+    "montar_tarefa_confirmar",
+    "montar_tarefa_conversar",
+    "montar_tarefa_processar_documento",
+    "resumir_diff_edicao",
+    "salvar_upload_temporario",
+    "validar_envelope_sinergia",
+    "verificar_catalogo_sintetico",
+    "verificar_endpoint_http",
+    "verificar_groq_ping",
+    "verificar_postgresql",
+    "verificar_variaveis_env",
+    "verificar_who_icd_api",
+]

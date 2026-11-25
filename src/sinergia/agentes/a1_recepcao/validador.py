@@ -21,16 +21,20 @@ import re
 import unicodedata
 from collections.abc import Collection, Sequence
 from datetime import date, timedelta
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from sinergia.agentes.a1_recepcao.schemas import (
     AtestadoExtraido,
     DivergenciaCampo,
+    ItemRevisaoCampo,
     OrigemDadosAtestado,
     PeriodoAfastamento,
     ProfissionalExtraido,
+    QuadroRevisaoAtestado,
     RegistroInicialCaso,
+    StatusRevisaoCampo,
 )
 
 UFS_BRASIL: frozenset[str] = frozenset(
@@ -288,16 +292,384 @@ _LABELS_CAMPOS_BAIXA_CONFIANCA: dict[str, str] = {
     "profissional.conselho": "conselho profissional",
     "profissional.numero": "número do registro profissional",
     "profissional.uf": "UF do registro profissional",
+    "profissional.nome": "nome do profissional",
     "cid": "código CID",
     "municipio": "município",
 }
+
+_ROTULOS_TIPO_DOCUMENTO: dict[str, str] = {
+    "atestado_medico": "Atestado médico",
+    "declaracao_comparecimento": "Declaração de comparecimento",
+    "outro": "Outro documento",
+}
+
+_CAMPOS_DIVERGENCIA_PARA_ITEM: dict[str, str] = {
+    "dias": "periodo.dias",
+    "inicio": "periodo.inicio",
+    "nome": "nome_no_documento",
+    "tipo_documento": "tipo_documento",
+}
+
+
+def _formatar_data_br(data: date | None) -> str:
+    return f"{data:%d/%m/%Y}" if data is not None else "Não identificado"
+
+
+def _obter_confianca_campo(extraido: AtestadoExtraido, campo: str) -> float | None:
+    meta = extraido.campos.get(campo)
+    bruto: float | None = meta.confianca if meta is not None else None
+    if bruto is None and extraido.confianca_campos:
+        if campo == "periodo.dias":
+            c_ini = extraido.confianca_campos.get("periodo.inicio")
+            c_fim = extraido.confianca_campos.get("periodo.fim")
+            if isinstance(c_ini, (int, float)) and isinstance(c_fim, (int, float)):
+                bruto = min(float(c_ini), float(c_fim))
+        else:
+            val = extraido.confianca_campos.get(campo)
+            if isinstance(val, (int, float)):
+                bruto = float(val)
+    if bruto is None:
+        return None
+    return round(max(0.0, min(1.0, float(bruto))), 4)
+
+
+def _formatar_profissional_resumo(extraido: AtestadoExtraido) -> str:
+    prof = extraido.profissional
+    conselho = prof.conselho
+    uf = prof.uf
+    numero = prof.numero
+    baixa_prof = any(
+        (m := extraido.campos.get(c)) is not None and m.vazio_por_baixa_confianca
+        for c in ("profissional.conselho", "profissional.numero", "profissional.uf")
+    )
+    if conselho and uf and numero:
+        return f"{conselho}/{uf} {numero}"
+    partes: list[str] = []
+    if conselho and uf:
+        partes.append(f"{conselho}/{uf}")
+    elif conselho:
+        partes.append(conselho)
+    elif uf:
+        partes.append(uf)
+    if numero:
+        partes.append(numero)
+    if partes:
+        sufixo = " (registro com baixa confiança)" if baixa_prof else ""
+        return f"{' '.join(partes)}{sufixo}"
+    return "Baixa confiança (informar)" if baixa_prof else "Não identificado"
+
+
+def _formatar_valor_resumo(
+    valor: Any,
+    *,
+    extraido: AtestadoExtraido,
+    campo: str,
+    exibicao_customizada: str | None = None,
+) -> str:
+    meta = extraido.campos.get(campo)
+    if meta is not None and meta.vazio_por_baixa_confianca:
+        return "Baixa confiança (informar)"
+    if valor is None:
+        return "Não identificado"
+    return exibicao_customizada if exibicao_customizada is not None else str(valor)
+
+
+def construir_quadro_revisao_atestado(
+    extraido: AtestadoExtraido,
+    divergencias: Sequence[DivergenciaCampo],
+    *,
+    politica_extrair_cid: bool | None = None,
+) -> QuadroRevisaoAtestado:
+    """Constrói o espelho determinístico dos campos lidos pelo LLM para revisão humana."""
+    incluir_cid = bool(politica_extrair_cid) or (extraido.cid is not None) or (
+        "cid" in extraido.campos and extraido.campos["cid"].vazio_por_baixa_confianca
+    )
+
+    if extraido.legibilidade == "ilegivel":
+        itens_ileg: list[ItemRevisaoCampo] = []
+        for chave, rotulo, obrigatorio in (
+            ("nome_no_documento", "Paciente no documento", False),
+            ("periodo.inicio", "Início do afastamento", True),
+            ("periodo.fim", "Término do afastamento", True),
+            ("profissional.conselho", "Conselho profissional", False),
+            ("profissional.numero", "Número do registro", False),
+            ("profissional.uf", "UF do registro", False),
+        ):
+            meta = extraido.campos.get(chave)
+            eh_baixa = bool(meta and meta.vazio_por_baixa_confianca)
+            status_item: StatusRevisaoCampo = (
+                "baixa_confianca" if eh_baixa else "nao_identificado"
+            )
+            itens_ileg.append(
+                ItemRevisaoCampo(
+                    campo=chave,
+                    rotulo=rotulo,
+                    valor_lido=None,
+                    valor_exibicao=(
+                        "Baixa confiança — conferir/preencher"
+                        if eh_baixa
+                        else "Não identificado"
+                    ),
+                    confianca=_obter_confianca_campo(extraido, chave),
+                    status=status_item,
+                    editavel=False,
+                    obrigatorio=obrigatorio,
+                )
+            )
+        return QuadroRevisaoAtestado(
+            titulo="Documento ilegível — novo envio necessário",
+            instrucao_colaborador=(
+                "Não foi possível ler os dados essenciais com segurança. "
+                "Envie uma foto ou PDF mais nítido e sem cortes."
+            ),
+            legibilidade="ilegivel",
+            resumo_markdown=(
+                "**Leitura indisponível:** o documento está ilegível ou incompleto "
+                "e nenhum registro foi salvo.\n\n"
+                "Envie uma foto ou PDF mais nítido e sem cortes para que eu faça nova leitura."
+            ),
+            itens=itens_ileg,
+            permite_confirmar_direto=False,
+            permite_editar=False,
+            requer_novo_arquivo=True,
+        )
+
+    div_por_campo: dict[str, DivergenciaCampo] = {}
+    for div in divergencias:
+        chave_item = _CAMPOS_DIVERGENCIA_PARA_ITEM.get(div.campo, div.campo)
+        div_por_campo[chave_item] = div
+
+    inicio = extraido.periodo.inicio
+    fim = extraido.periodo.fim
+    dias = extraido.periodo.dias_calculados
+    tipo_exib = _ROTULOS_TIPO_DOCUMENTO.get(
+        extraido.tipo_documento, extraido.tipo_documento
+    )
+
+    definicoes: list[tuple[str, str, Any, str, bool, bool]] = [
+        ("tipo_documento", "Tipo de documento", extraido.tipo_documento, tipo_exib, True, True),
+        (
+            "nome_no_documento",
+            "Paciente no documento",
+            extraido.nome_no_documento,
+            str(extraido.nome_no_documento or ""),
+            True,
+            False,
+        ),
+        (
+            "periodo.inicio",
+            "Início do afastamento",
+            inicio.isoformat() if inicio is not None else None,
+            _formatar_data_br(inicio),
+            True,
+            True,
+        ),
+        (
+            "periodo.fim",
+            "Término do afastamento",
+            fim.isoformat() if fim is not None else None,
+            _formatar_data_br(fim),
+            True,
+            True,
+        ),
+        (
+            "periodo.dias",
+            "Duração",
+            dias,
+            f"{dias} dia(s)" if dias is not None else "Não identificado",
+            False,
+            True,
+        ),
+        (
+            "data_emissao",
+            "Data de emissão",
+            extraido.data_emissao.isoformat()
+            if extraido.data_emissao is not None
+            else None,
+            _formatar_data_br(extraido.data_emissao),
+            True,
+            False,
+        ),
+        (
+            "profissional.conselho",
+            "Conselho profissional",
+            extraido.profissional.conselho,
+            str(extraido.profissional.conselho or ""),
+            True,
+            False,
+        ),
+        (
+            "profissional.numero",
+            "Número do registro",
+            extraido.profissional.numero,
+            str(extraido.profissional.numero or ""),
+            True,
+            False,
+        ),
+        (
+            "profissional.uf",
+            "UF do registro",
+            extraido.profissional.uf,
+            str(extraido.profissional.uf or ""),
+            True,
+            False,
+        ),
+    ]
+
+    meta_prof_nome = extraido.campos.get("profissional.nome")
+    if extraido.profissional.nome is not None or (
+        meta_prof_nome is not None and meta_prof_nome.vazio_por_baixa_confianca
+    ):
+        definicoes.append(
+            (
+                "profissional.nome",
+                "Nome do profissional",
+                extraido.profissional.nome,
+                str(extraido.profissional.nome or ""),
+                True,
+                False,
+            )
+        )
+
+    definicoes.append(
+        (
+            "municipio",
+            "Município de emissão",
+            extraido.municipio,
+            str(extraido.municipio or ""),
+            True,
+            False,
+        )
+    )
+    if incluir_cid:
+        definicoes.append(
+            (
+                "cid",
+                "Código CID-10",
+                extraido.cid,
+                str(extraido.cid or ""),
+                True,
+                False,
+            )
+        )
+
+    itens: list[ItemRevisaoCampo] = []
+    for chave, rotulo, valor_lido, valor_fmt, editavel, obrigatorio in definicoes:
+        meta = extraido.campos.get(chave)
+        div = div_por_campo.get(chave)
+        confianca = _obter_confianca_campo(extraido, chave)
+
+        if div is not None:
+            status_campo: StatusRevisaoCampo = "divergente"
+            valor_exibicao = valor_fmt if valor_lido is not None else "Não identificado"
+            valor_antes = div.informado
+        elif meta is not None and meta.vazio_por_baixa_confianca:
+            status_campo = "baixa_confianca"
+            valor_exibicao = "Baixa confiança — conferir/preencher"
+            valor_antes = None
+        elif valor_lido is None:
+            status_campo = "nao_identificado"
+            valor_exibicao = "Não identificado"
+            valor_antes = None
+        else:
+            status_campo = "lido_ok"
+            valor_exibicao = valor_fmt
+            valor_antes = None
+
+        itens.append(
+            ItemRevisaoCampo(
+                campo=chave,
+                rotulo=rotulo,
+                valor_lido=valor_lido,
+                valor_exibicao=valor_exibicao,
+                valor_informado_antes=valor_antes,
+                confianca=confianca,
+                status=status_campo,
+                editavel=editavel,
+                obrigatorio=obrigatorio,
+            )
+        )
+
+    if inicio is not None and fim is not None and dias is not None:
+        periodo_resumo = f"{inicio:%d/%m/%Y} a {fim:%d/%m/%Y} ({dias} dia(s))"
+    elif inicio is not None:
+        periodo_resumo = f"Início em {inicio:%d/%m/%Y} (término não identificado)"
+    elif fim is not None:
+        periodo_resumo = f"Término em {fim:%d/%m/%Y} (início não identificado)"
+    else:
+        baixa_ini = (m_i := extraido.campos.get("periodo.inicio")) is not None and m_i.vazio_por_baixa_confianca
+        baixa_fim = (m_f := extraido.campos.get("periodo.fim")) is not None and m_f.vazio_por_baixa_confianca
+        periodo_resumo = (
+            "Baixa confiança (informar)"
+            if (baixa_ini or baixa_fim)
+            else "Não identificado"
+        )
+
+    linhas_md = [
+        "**Dados lidos no documento:**",
+        f"- **Tipo:** {tipo_exib}",
+        "- **Paciente:** "
+        + _formatar_valor_resumo(
+            extraido.nome_no_documento,
+            extraido=extraido,
+            campo="nome_no_documento",
+        ),
+        f"- **Período:** {periodo_resumo}",
+        "- **Emissão:** "
+        + _formatar_valor_resumo(
+            extraido.data_emissao,
+            extraido=extraido,
+            campo="data_emissao",
+            exibicao_customizada=_formatar_data_br(extraido.data_emissao),
+        ),
+        f"- **Profissional:** {_formatar_profissional_resumo(extraido)}",
+        "- **Município:** "
+        + _formatar_valor_resumo(
+            extraido.municipio,
+            extraido=extraido,
+            campo="municipio",
+        ),
+    ]
+    if incluir_cid:
+        linhas_md.append(
+            "- **CID-10:** "
+            + _formatar_valor_resumo(
+                extraido.cid,
+                extraido=extraido,
+                campo="cid",
+            )
+        )
+
+    permite_confirmar = bool(
+        inicio is not None and fim is not None and fim >= inicio
+    )
+    titulo = (
+        "Atenção: divergências encontradas — valide os dados"
+        if divergencias
+        else "Revise e valide os dados lidos no documento"
+    )
+    return QuadroRevisaoAtestado(
+        titulo=titulo,
+        instrucao_colaborador=(
+            "Confira abaixo as informações lidas no seu documento. "
+            "Confirme se está tudo certo ou informe o que precisa alterar."
+        ),
+        legibilidade="ok",
+        resumo_markdown="\n".join(linhas_md),
+        itens=itens,
+        permite_confirmar_direto=permite_confirmar,
+        permite_editar=True,
+        requer_novo_arquivo=False,
+    )
 
 
 def gerar_mensagem_confirmacao_extracao(
     extraido: AtestadoExtraido,
     divergencias: Sequence[DivergenciaCampo],
+    *,
+    politica_extrair_cid: bool | None = None,
 ) -> str:
-    """Gera a pergunta de confirmação para o colaborador após `a1.processar_documento`."""
+    """Gera a pergunta de confirmação com todos os dados lidos após `a1.processar_documento`."""
     if extraido.legibilidade == "ilegivel":
         return (
             "Não consegui ler o atestado com clareza. "
@@ -321,49 +693,63 @@ def gerar_mensagem_confirmacao_extracao(
     if len(divergencias) == 1:
         div = divergencias[0]
         if div.campo == "dias" and inicio is not None and fim is not None:
-            return (
+            frase_inicial = (
                 f"Li no atestado {div.no_documento} dias ({inicio:%d/%m} a {fim:%d/%m}), "
                 f"mas você informou {div.informado}. Qual está certo?{sufixo_baixa_conf}"
             )
-        if div.campo == "inicio" and inicio is not None:
+        elif div.campo == "inicio" and inicio is not None:
             data_inf = div.informado
             try:
                 data_inf_fmt = f"{date.fromisoformat(str(div.informado)):%d/%m}"
             except ValueError:
                 data_inf_fmt = str(data_inf)
-            return (
+            frase_inicial = (
                 f"Li no atestado início em {inicio:%d/%m}, mas você informou "
                 f"{data_inf_fmt}. Qual data está correta?{sufixo_baixa_conf}"
             )
-        if div.campo == "nome":
-            return (
+        elif div.campo == "nome":
+            frase_inicial = (
                 f"O nome lido no documento foi '{div.no_documento}', diferente do "
                 f"seu cadastro ('{div.informado}'). Confirma se este atestado é seu?{sufixo_baixa_conf}"
             )
-        if div.campo == "cid":
-            return (
+        elif div.campo == "cid":
+            frase_inicial = (
                 f"O código CID '{div.no_documento}' lido no documento não foi "
                 f"encontrado na tabela oficial CID. Pode conferir o código ou deixá-lo em branco?{sufixo_baixa_conf}"
             )
-
-    if divergencias:
+        else:
+            frase_inicial = (
+                f"Encontrei diferença em {div.campo} (no documento '{div.no_documento}' vs "
+                f"informado '{div.informado}'). Pode revisar e confirmar os dados corretos?{sufixo_baixa_conf}"
+            )
+    elif divergencias:
         itens = "; ".join(
             f"{d.campo}: no documento '{d.no_documento}' vs informado '{d.informado}'"
             for d in divergencias
         )
-        return (
+        frase_inicial = (
             f"Encontrei diferenças entre o atestado e o informado inicialmente ({itens}). "
             f"Pode revisar e confirmar os dados corretos?{sufixo_baixa_conf}"
         )
-
-    if inicio is not None and fim is not None:
+    elif inicio is not None and fim is not None:
         dias = extraido.periodo.dias_calculados
-        return (
+        frase_inicial = (
             f"Li seu atestado de {inicio:%d/%m} a {fim:%d/%m} ({dias} dia(s)). "
             f"Os dados extraídos estão corretos para eu registrar?{sufixo_baixa_conf}"
         )
+    else:
+        frase_inicial = (
+            f"Extraí os dados do seu atestado. Pode revisar e confirmar as informações?{sufixo_baixa_conf}"
+        )
 
-    return f"Extraí os dados do seu atestado. Pode revisar e confirmar as informações?{sufixo_baixa_conf}"
+    quadro = construir_quadro_revisao_atestado(
+        extraido, divergencias, politica_extrair_cid=politica_extrair_cid
+    )
+    return (
+        f"{frase_inicial}\n\n"
+        f"{quadro.resumo_markdown}\n\n"
+        "Confirme se os dados acima estão corretos ou informe o que deseja alterar."
+    )
 
 
 def _eh_dia_util(data: date, feriados: frozenset[date]) -> bool:
