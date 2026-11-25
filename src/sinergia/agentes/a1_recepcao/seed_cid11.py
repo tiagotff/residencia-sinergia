@@ -34,15 +34,28 @@ def gerar_sql_seed_cids(registros: Sequence[DadosCidWHO], destino: Path) -> Path
         "",
     ]
     if registros:
-        linhas.append("INSERT INTO afastamento.cid (codigo_cid, descricao, capitulo)")
+        linhas.append(
+            "INSERT INTO afastamento.cid (codigo_cid, nome_doenca, descricao, capitulo)"
+        )
         linhas.append("VALUES")
-        valores = [
-            f"    ('{_escapar_sql(r.codigo_cid)}', '{_escapar_sql(r.descricao)}', '{_escapar_sql(r.capitulo)}')"
-            for r in registros
-        ]
+        valores = []
+        for r in registros:
+            nome = (r.nome_doenca or r.descricao).strip() or r.descricao
+            valores.append(
+                "    ("
+                f"'{_escapar_sql(r.codigo_cid)}', "
+                f"'{_escapar_sql(nome)}', "
+                f"'{_escapar_sql(r.descricao)}', "
+                f"'{_escapar_sql(r.capitulo)}'"
+                ")"
+            )
         linhas.append(",\n".join(valores))
         linhas.append("ON CONFLICT (codigo_cid) DO UPDATE")
-        linhas.append("SET descricao = EXCLUDED.descricao, capitulo = EXCLUDED.capitulo;")
+        linhas.append(
+            "SET nome_doenca = EXCLUDED.nome_doenca, "
+            "descricao = EXCLUDED.descricao, "
+            "capitulo = EXCLUDED.capitulo;"
+        )
     destino.write_text("\n".join(linhas) + "\n", encoding="utf-8")
     return destino
 
@@ -83,7 +96,10 @@ def executar_seed_cid11(
     inseridos = 0
     if not dry_run and database_url:
         repo = RepositorioA1Postgres(database_url)
-        tuplas = [(c.codigo_cid, c.descricao, c.capitulo) for c in cids]
+        tuplas = [
+            (c.codigo_cid, c.nome_doenca or c.descricao, c.descricao, c.capitulo)
+            for c in cids
+        ]
         inseridos = repo.salvar_cids_em_lote(tuplas)
 
     return cids, inseridos

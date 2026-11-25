@@ -111,11 +111,13 @@ VALUES
 ON CONFLICT (id_conselho) DO UPDATE
 SET sigla = EXCLUDED.sigla, descricao = EXCLUDED.descricao;
 
-INSERT INTO afastamento.cid (codigo_cid, descricao, capitulo)
+INSERT INTO afastamento.cid (codigo_cid, nome_doenca, descricao, capitulo)
 VALUES
-    ('M54.5', 'Dor lombar baixa', 'M'),
-    ('F41.1', 'Ansiedade generalizada', 'F'),
-    ('J06.9', 'Infeccao aguda das vias aéreas superiores', 'J'),
-    ('Z00.0', 'Exame médico geral', 'Z')
+    ('M54.5', 'Dor lombar baixa', 'Dor localizada na região lombar inferior (lombalgia não especificada).', 'M'),
+    ('F41.1', 'Ansiedade generalizada', 'Transtorno caracterizado por ansiedade e preocupação persistentes e excessivas.', 'F'),
+    ('J06.9', 'Infecção aguda das vias aéreas superiores', 'Infecção aguda das vias aéreas superiores não especificada (resfriado comum / IVAS).', 'J'),
+    ('Z00.0', 'Exame médico geral', 'Consulta médica para exame clínico geral ou rastreamento sem queixas específicas.', 'Z')
 ON CONFLICT (codigo_cid) DO UPDATE
-SET descricao = EXCLUDED.descricao, capitulo = EXCLUDED.capitulo;
+SET nome_doenca = EXCLUDED.nome_doenca,
+    descricao = EXCLUDED.descricao,
+    capitulo = EXCLUDED.capitulo;
