@@ -429,6 +429,18 @@ def test_migracao_sql_003_modelo_fisico_guia_v07() -> None:
     assert "CREATE OR REPLACE VIEW afastamento.vw_baixa_fisica" in sql
     assert not re.search(r"\borquestracao\.", sql, re.IGNORECASE)
 
+    migracao_004 = Path("db/schema/004_adicionar_nome_doenca_cid.sql")
+    assert migracao_004.is_file()
+    sql_004 = migracao_004.read_text(encoding="utf-8")
+    assert "ALTER TABLE afastamento.cid" in sql_004
+    assert "ALTER TABLE afastamento.cid_restrito" in sql_004
+    assert "ALTER TABLE afastamento.atestado" in sql_004
+    assert "ADD COLUMN IF NOT EXISTS nome_doenca VARCHAR(255)" in sql_004
+    assert "afastamento.fn_sincronizar_nome_doenca_cid" in sql_004
+    assert "trg_sincronizar_nome_doenca_cid" in sql_004
+    assert "CREATE OR REPLACE VIEW afastamento.vw_atestado_sem_cid" in sql_004
+    assert not re.search(r"\borquestracao\.", sql_004, re.IGNORECASE)
+
 
 def test_persistencia_5_tabelas_v07_stateless_auditoria_e_cid_restrito(
     tmp_path: Path,
@@ -479,11 +491,13 @@ def test_persistencia_5_tabelas_v07_stateless_auditoria_e_cid_restrito(
     id_atestado = pendente.id_atestado
     assert pendente.id_caso == 105
     assert pendente.tipo_documento == "atestado_medico"
-    # CID isolado em afastamento.cid_restrito, jamais exposto na tabela principal
-    assert pendente.codigo_cid is None
+    # CID e nome_doenca gravados em afastamento.atestado e afastamento.cid_restrito
+    assert pendente.codigo_cid == "J06.9"
+    assert pendente.nome_doenca == "Infecção aguda das vias aéreas superiores"
     cid_restrito = repo.obter_cid_restrito(id_atestado)
     assert cid_restrito is not None
     assert cid_restrito.codigo_cid == "J06.9"
+    assert cid_restrito.nome_doenca == "Infecção aguda das vias aéreas superiores"
 
     arquivos = repo.listar_arquivos_atestado(id_atestado)
     assert len(arquivos) == 1
@@ -517,7 +531,12 @@ def test_persistencia_5_tabelas_v07_stateless_auditoria_e_cid_restrito(
     at_conf = repo.obter_atestado(id_atestado)
     assert at_conf is not None
     assert at_conf.prazos_legais == ["inss_16_dias"]
-    assert at_conf.codigo_cid is None
+    assert at_conf.codigo_cid == "J06.9"
+    assert at_conf.nome_doenca == "Infecção aguda das vias aéreas superiores"
+    cid_restrito_conf = repo.obter_cid_restrito(id_atestado)
+    assert cid_restrito_conf is not None
+    assert cid_restrito_conf.codigo_cid == "J06.9"
+    assert cid_restrito_conf.nome_doenca == "Infecção aguda das vias aéreas superiores"
 
     campos_conf = {c.nome_campo: c for c in repo.listar_campos_atestado(id_atestado)}
     assert campos_conf["periodo.fim"].valor_extraido == "2026-11-11"
@@ -562,6 +581,8 @@ def test_persistencia_5_tabelas_v07_stateless_auditoria_e_cid_restrito(
     agente_sem_cid.executar(t_sem_cid)
     pend2 = repo_sem_cid.obter_ultimo_atestado_pendente(42)
     assert pend2 is not None
+    assert pend2.codigo_cid is None
+    assert pend2.nome_doenca is None
     assert repo_sem_cid.obter_cid_restrito(pend2.id_atestado) is None
 
 

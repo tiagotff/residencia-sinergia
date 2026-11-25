@@ -94,6 +94,10 @@ def test_cliente_cid_who_oauth2_cid11_pt_cid10_e_retry_401_429() -> None:
                     "classKind": "category",
                     "chapter": "21",
                     "title": {"@language": "pt", "@value": "Dor lombar baixa"},
+                    "definition": {
+                        "@language": "pt",
+                        "@value": "Dor localizada abaixo do rebordo costal e acima das pregas glúteas inferiores.",
+                    },
                 },
             )
 
@@ -134,7 +138,11 @@ def test_cliente_cid_who_oauth2_cid11_pt_cid10_e_retry_401_429() -> None:
     assert res_11.status == "ENCONTRADO"
     assert res_11.dados is not None
     assert res_11.dados.codigo_cid == "ME84.2"
-    assert res_11.dados.descricao == "Dor lombar baixa"
+    assert res_11.dados.nome_doenca == "Dor lombar baixa"
+    assert (
+        res_11.dados.descricao
+        == "Dor localizada abaixo do rebordo costal e acima das pregas glúteas inferiores."
+    )
     assert res_11.dados.capitulo == "21"
     assert res_11.dados.versao_cid == "CID-11"
     assert contadores["token"] == 2  # 1ª emissão + renovação após 401
@@ -199,6 +207,10 @@ def test_servico_a1_cache_aside_banco_vs_api_externa_e_cid_inexistente(
                     "classKind": "category",
                     "chapter": "21",
                     "title": {"@language": "pt", "@value": "Dor lombar baixa"},
+                    "definition": {
+                        "@language": "pt",
+                        "@value": "Dor localizada abaixo do rebordo costal e acima das pregas glúteas inferiores.",
+                    },
                 },
             )
         if url.endswith("/codeinfo/ZZ99.9"):
@@ -235,12 +247,28 @@ def test_servico_a1_cache_aside_banco_vs_api_externa_e_cid_inexistente(
     assert r_miss["estado_proposto"] == "VALIDADO"
     assert len(chamadas_api) == 2  # codeinfo + entidade
     assert "ME84.2" in repo.cids
-    assert repo.cids["ME84.2"] == "Dor lombar baixa"
+    assert (
+        repo.cids["ME84.2"]
+        == "Dor localizada abaixo do rebordo costal e acima das pregas glúteas inferiores."
+    )
+    cid_info = repo.obter_cid("ME84.2")
+    assert cid_info is not None
+    assert cid_info["nome_doenca"] == "Dor lombar baixa"
+    assert (
+        cid_info["descricao"]
+        == "Dor localizada abaixo do rebordo costal e acima das pregas glúteas inferiores."
+    )
     assert agente.ultimo_diagnostico_cid is not None
     assert agente.ultimo_diagnostico_cid["origem"] == "API_WHO_EXTERNA_CACHE_ASIDE"
+    assert agente.ultimo_diagnostico_cid["nome_doenca"] == "Dor lombar baixa"
+    atestado_salvo = repo.obter_atestado(r_miss["payload"]["id_atestado"])
+    assert atestado_salvo is not None
+    assert atestado_salvo.codigo_cid == "ME84.2"
+    assert atestado_salvo.nome_doenca == "Dor lombar baixa"
     cid_restrito = repo.obter_cid_restrito(r_miss["payload"]["id_atestado"])
     assert cid_restrito is not None
     assert cid_restrito.codigo_cid == "ME84.2"
+    assert cid_restrito.nome_doenca == "Dor lombar baixa"
 
     # 3. Segunda consulta do mesmo ME84.2 -> hit local no banco (0 novas chamadas API!)
     t_cache = copy.deepcopy(t_hit)
@@ -357,8 +385,8 @@ def test_seed_cid11_container_local_e_exportacao_sql(tmp_path: Path) -> None:
     assert all(c.capitulo == "21" for c in cids)
     assert sql_destino.is_file()
     conteudo_sql = sql_destino.read_text(encoding="utf-8")
-    assert "INSERT INTO afastamento.cid" in conteudo_sql
-    assert "'ME84.2', 'Dor lombar baixa', '21'" in conteudo_sql
+    assert "INSERT INTO afastamento.cid (codigo_cid, nome_doenca, descricao, capitulo)" in conteudo_sql
+    assert "'ME84.2', 'Dor lombar baixa', 'Dor lombar baixa', '21'" in conteudo_sql
 
     # Verifica que gerar_sql_seed_cids escapa aspas simples com segurança
     sql_escape = tmp_path / "escape.sql"

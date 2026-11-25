@@ -161,18 +161,22 @@ def test_cliente_conexao_in_process_http_a1_e_inspetor_lgpd() -> None:
     caso = aplicar_resultado_ao_caso(caso, tr_baixa)
     assert caso.baixa_registrada is True
 
-    # Inspetor das 5 tabelas: RH enxerga cid_restrito, Gestor/A2 não enxerga
+    # Inspetor das 5 tabelas: RH enxerga codigo_cid/nome_doenca e cid_restrito, Gestor/A2 não enxerga
     visao_rh = cliente_inproc.inspecionar_tabelas_afastamento(perfil_acesso="A1_RH")
     assert len(visao_rh["atestado"]) == 1
+    assert visao_rh["atestado"][0]["codigo_cid"] == "J06.9"
+    assert visao_rh["atestado"][0]["nome_doenca"] == "Infecção aguda das vias aéreas superiores"
     assert len(visao_rh["atestado_arquivo"]) == 1
     assert len(visao_rh["atestado_campo"]) > 0
     assert len(visao_rh["baixa_fisica"]) == 1
     assert len(visao_rh["cid_restrito"]) == 1
     assert visao_rh["cid_restrito"][0]["codigo_cid"] == "J06.9"
+    assert visao_rh["cid_restrito"][0]["nome_doenca"] == "Infecção aguda das vias aéreas superiores"
 
     visao_gestor = cliente_inproc.inspecionar_tabelas_afastamento(perfil_acesso="GESTOR_A2")
     assert visao_gestor["cid_restrito"] == []
     assert "codigo_cid" not in visao_gestor["atestado"][0]
+    assert "nome_doenca" not in visao_gestor["atestado"][0]
 
     # Transporte HTTP FastAPI A1 via TestClient
     repo_http = RepositorioA1Memoria()
@@ -272,11 +276,13 @@ def test_apptest_renderizacao_e_fluxo_basico_streamlit(
     """Executa o app Streamlit via AppTest cobrindo espelho HITL, edição guiada e modos."""
     monkeypatch.setenv("GROQ_API_KEY", "")
     monkeypatch.setenv("POLITICA_CID", "nao_extrair")
+    monkeypatch.setenv("A1_MODO_REPO", "memoria")
 
     at = AppTest.from_file(APP_PAINEL_PATH, default_timeout=30)
     at.run()
     assert not at.exception
     assert len(at.tabs) == 4
+    assert at.radio(key="sb_modo_repo").value == "memoria"
 
     # 1. Envia a1.conversar
     at.button(key="btn_conv_105").click().run()
@@ -355,6 +361,10 @@ def test_painel_api_who_cid_origem_banco_vs_api_externa_in_process_e_http() -> N
                     "classKind": "category",
                     "chapter": "21",
                     "title": {"@language": "pt", "@value": "Dor lombar baixa"},
+                    "definition": {
+                        "@language": "pt",
+                        "@value": "Condição definida como dor na região lombar.",
+                    },
                 },
             )
         return httpx.Response(404)
@@ -392,10 +402,19 @@ def test_painel_api_who_cid_origem_banco_vs_api_externa_in_process_e_http() -> N
     # 2. Código CID-11 ausente -> API Externa OMS + cache-aside no banco
     diag_api = cliente.consultar_cid("ME84.2")
     assert diag_api["origem"] == "API_WHO_EXTERNA_CACHE_ASIDE"
-    assert diag_api["descricao"] == "Dor lombar baixa"
+    assert diag_api["nome_doenca"] == "Dor lombar baixa"
+    assert diag_api["descricao"] == "Condição definida como dor na região lombar."
     assert len(chamadas_api) == 2
     assert "ME84.2" in repo.cids
-    assert "API Externa OMS" in renderizar_card_origem_cid(diag_api)
+    cid_info = repo.obter_cid("ME84.2")
+    assert cid_info is not None
+    assert cid_info["nome_doenca"] == "Dor lombar baixa"
+    assert cid_info["descricao"] == "Condição definida como dor na região lombar."
+    card_api = renderizar_card_origem_cid(diag_api)
+    assert "API Externa OMS" in card_api
+    assert "Nome da doença:" in card_api
+    assert "Descrição:" in card_api
+    assert "Salvo em afastamento.cid" in card_api
     assert "sinergia-badge--api" in renderizar_badge_origem_cid(diag_api)
 
     # 3. Segunda consulta do mesmo código -> vem do Banco Local (cache-aside)
@@ -438,7 +457,24 @@ def test_painel_api_who_cid_origem_banco_vs_api_externa_in_process_e_http() -> N
     assert tr_http.resultado["status"] == "OK"
     assert tr_http.diagnostico_cid is not None
     assert tr_http.diagnostico_cid["origem"] == "API_WHO_EXTERNA_CACHE_ASIDE"
-    assert tr_http.diagnostico_cid["descricao"] == "Dor lombar baixa"
+    assert tr_http.diagnostico_cid["nome_doenca"] == "Dor lombar baixa"
+    assert tr_http.diagnostico_cid["descricao"] == "Condição definida como dor na região lombar."
     caso_atualizado = aplicar_resultado_ao_caso(caso, tr_http)
     assert caso_atualizado.ultimo_diagnostico_cid is not None
     assert caso_atualizado.ultimo_diagnostico_cid["origem"] == "API_WHO_EXTERNA_CACHE_ASIDE"
+
+
+def test_apptest_inicia_com_postgres_por_padrao_quando_database_url_configurada(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Garante que o seletor de repositório inicia em postgres quando DATABASE_URL está ativa."""
+    monkeypatch.setenv("GROQ_API_KEY", "")
+    monkeypatch.delenv("A1_MODO_REPO", raising=False)
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql://sinergia:sinergia@localhost:5432/sinergia"
+    )
+
+    at = AppTest.from_file(APP_PAINEL_PATH, default_timeout=30)
+    at.run()
+    assert not at.exception
+    assert at.radio(key="sb_modo_repo").value == "postgres"
