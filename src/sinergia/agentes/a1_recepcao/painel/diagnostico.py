@@ -17,6 +17,7 @@ from sinergia.agentes.a1_recepcao.avaliacao_metricas import (
 from sinergia.agentes.a1_recepcao.cliente_cid_who import ClienteCidWHO
 from sinergia.agentes.a1_recepcao.config import A1Config, obter_config_a1
 from sinergia.agentes.a1_recepcao.gerador_sintetico import garantir_atestados_sinteticos
+from sinergia.agentes.a1_recepcao.repositorio import RepositorioA1Postgres
 
 try:
     import psycopg
@@ -419,19 +420,41 @@ def verificar_who_icd_api(
     res = cli.consultar_cid(codigo_teste)
     latencia_ms = round((time.perf_counter() - inicio) * 1000, 1)
     if res.status == "ENCONTRADO" and res.dados is not None:
+        nome_doenca = res.dados.nome_doenca or res.dados.descricao
+        persistido_banco = False
+        if cfg.database_url.strip() and psycopg is not None:
+            erros_db: tuple[type[BaseException], ...] = (
+                psycopg.Error,
+                OSError,
+                ValueError,
+                RuntimeError,
+            )
+            try:
+                RepositorioA1Postgres(cfg.database_url).salvar_cid(
+                    res.dados.codigo_cid,
+                    res.dados.descricao,
+                    res.dados.capitulo,
+                    nome_doenca=nome_doenca,
+                )
+                persistido_banco = True
+            except erros_db:
+                persistido_banco = False
+        sufixo_db = " e salvo em afastamento.cid" if persistido_banco else ""
         return ItemDiagnostico(
             nome="API Externa WHO ICD (CID-11/CID-10)",
             status="ok",
             resumo=(
                 f"Conectado em {latencia_ms} ms; teste {res.dados.codigo_cid} "
-                f"({res.dados.versao_cid}): {res.dados.descricao}."
+                f"({res.dados.versao_cid}): {nome_doenca}{sufixo_db}."
             ),
             detalhes={
                 "latencia_ms": latencia_ms,
                 "codigo_teste": res.dados.codigo_cid,
+                "nome_doenca": nome_doenca,
                 "descricao": res.dados.descricao,
                 "capitulo": res.dados.capitulo,
                 "versao_cid": res.dados.versao_cid,
+                "persistido_em_afastamento_cid": persistido_banco,
             },
         )
     return ItemDiagnostico(

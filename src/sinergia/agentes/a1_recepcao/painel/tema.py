@@ -339,18 +339,30 @@ def renderizar_card_origem_cid(diag: dict[str, Any] | None) -> str:
     rotulo, variante = _descrever_origem_cid(diag)
     badge = renderizar_badge_status(rotulo, variante)
     codigo = html.escape(str(diag.get("codigo_cid") or "—"))
-    descricao = str(diag.get("descricao") or "").strip()
+    nome_doenca = str(diag.get("nome_doenca") or diag.get("descricao") or "").strip()
     capitulo = str(diag.get("capitulo") or "").strip()
     detalhe = str(diag.get("detalhe") or "").strip()
+    origem = str(diag.get("origem") or "")
 
     partes = [badge, f"<strong>CID {codigo}</strong>"]
-    if descricao:
-        partes.append(f"<span>— {html.escape(descricao)}</span>")
+    if nome_doenca:
+        partes.append(
+            f"<span>— <strong>Nome da doença:</strong> {html.escape(nome_doenca)}</span>"
+        )
+    descricao = str(diag.get("descricao") or "").strip()
+    if descricao and descricao != nome_doenca:
+        partes.append(
+            f'<span style="color:#52525B;">· <strong>Descrição:</strong> {html.escape(descricao)}</span>'
+        )
     if capitulo:
         partes.append(
             f'<span style="color:#71717A;">(Cap. {html.escape(capitulo)})</span>'
         )
-    if not descricao and detalhe:
+    if origem == "API_WHO_EXTERNA_CACHE_ASIDE":
+        partes.append(
+            '<span style="color:#1D4ED8;font-weight:600;">· Salvo em afastamento.cid</span>'
+        )
+    if not nome_doenca and detalhe:
         partes.append(f'<span style="color:#71717A;">({html.escape(detalhe)})</span>')
 
     classe_box = f"sinergia-cid-box sinergia-cid-box--{variante}"

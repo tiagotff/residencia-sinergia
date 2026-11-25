@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -171,9 +172,15 @@ def _renderizar_sidebar() -> tuple[ClienteConexaoA0A1, dict[str, Any]]:
 
         st.divider()
         st.markdown("**2. Repositório de Dados**")
+        modo_repo_env = os.getenv("A1_MODO_REPO", "").strip().lower()
+        opcoes_repo: list[ModoRepositorio] = (
+            ["postgres", "memoria"]
+            if cfg_base.database_url.strip() and modo_repo_env != "memoria"
+            else ["memoria", "postgres"]
+        )
         modo_repo: ModoRepositorio = st.radio(
             "Persistência do A1",
-            options=["memoria", "postgres"],
+            options=opcoes_repo,
             format_func=lambda x: (
                 "Memória (RepositorioA1Memoria)"
                 if x == "memoria"
@@ -1185,8 +1192,8 @@ def _renderizar_aba_inspetor(cliente: ClienteConexaoA0A1) -> None:
     tabelas = cliente.inspecionar_tabelas_afastamento(perfil_acesso=perfil_visao)
     if perfil_visao == "GESTOR_A2":
         st.info(
-            "Visão LGPD Art. 11 ativa: coluna `codigo_cid` removida e tabela "
-            "`afastamento.cid_restrito` isolada por RLS."
+            "Visão LGPD Art. 11 ativa: colunas `codigo_cid` e `nome_doenca` removidas "
+            "e tabela `afastamento.cid_restrito` isolada por RLS."
         )
 
     nomes = (
@@ -1229,10 +1236,26 @@ def _renderizar_aba_inspetor(cliente: ClienteConexaoA0A1) -> None:
                 st.session_state.painel_consulta_cid = cliente.consultar_cid(codigo_teste)
 
         if st.session_state.painel_consulta_cid is not None:
+            diag_consulta = st.session_state.painel_consulta_cid
             st.markdown(
-                renderizar_card_origem_cid(st.session_state.painel_consulta_cid),
+                renderizar_card_origem_cid(diag_consulta),
                 unsafe_allow_html=True,
             )
+            if diag_consulta.get("origem") == "API_WHO_EXTERNA_CACHE_ASIDE":
+                destino_repo = (
+                    "PostgreSQL (`afastamento.cid`)"
+                    if cliente.modo_repo == "postgres"
+                    else "repositório em memória (`RepositorioA1Memoria`)"
+                )
+                nome_doenca_salvo = (
+                    diag_consulta.get("nome_doenca")
+                    or diag_consulta.get("descricao")
+                    or ""
+                )
+                st.success(
+                    f"CID `{diag_consulta.get('codigo_cid')}` ({nome_doenca_salvo}) "
+                    f"consultado na API da OMS e salvo em {destino_repo}."
+                )
 
         with st.expander("Catálogo local `afastamento.cid`", expanded=False):
             filtro_cid = st.text_input(

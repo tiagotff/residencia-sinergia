@@ -213,13 +213,22 @@ class ClienteConexaoA0A1:
             if isinstance(valido_raw, str) and valido_raw.lower() in {"true", "false"}
             else None
         )
+        descricao = (
+            unquote(headers["X-Sinergia-Cid-Descricao"])
+            if headers.get("X-Sinergia-Cid-Descricao")
+            else None
+        )
+        nome_doenca = (
+            unquote(headers["X-Sinergia-Cid-Nome-Doenca"])
+            if headers.get("X-Sinergia-Cid-Nome-Doenca")
+            else descricao
+        )
         diag: dict[str, Any] = {
             "codigo_cid": headers.get("X-Sinergia-Cid-Codigo"),
             "origem": str(origem),
             "valido": valido,
-            "descricao": unquote(headers["X-Sinergia-Cid-Descricao"])
-            if headers.get("X-Sinergia-Cid-Descricao")
-            else None,
+            "nome_doenca": nome_doenca,
+            "descricao": descricao,
         }
         if headers.get("X-Sinergia-Cid-Capitulo"):
             diag["capitulo"] = unquote(headers["X-Sinergia-Cid-Capitulo"])
@@ -339,10 +348,13 @@ class ClienteConexaoA0A1:
             "codigo_cid": codigo_cid.strip().upper() or None,
             "origem": "SINTAXE_INVALIDA",
             "valido": False,
+            "nome_doenca": None,
             "descricao": None,
         }
         diag.setdefault("codigo_cid", codigo_norm or codigo_cid.strip().upper())
         diag.setdefault("valido", existe)
+        if not diag.get("nome_doenca"):
+            diag["nome_doenca"] = diag.get("descricao")
         return diag
 
     def listar_catalogo_cids(
@@ -436,6 +448,7 @@ class ClienteConexaoA0A1:
             for row in tabelas["atestado"]:
                 copia = dict(row)
                 copia.pop("codigo_cid", None)
+                copia.pop("nome_doenca", None)
                 atestados_sem_cid.append(copia)
             tabelas["atestado"] = atestados_sem_cid
             tabelas["cid_restrito"] = []
