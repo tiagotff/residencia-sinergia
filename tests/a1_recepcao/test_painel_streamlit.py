@@ -462,6 +462,13 @@ def test_painel_api_who_cid_origem_banco_vs_api_externa_in_process_e_http() -> N
     caso_atualizado = aplicar_resultado_ao_caso(caso, tr_http)
     assert caso_atualizado.ultimo_diagnostico_cid is not None
     assert caso_atualizado.ultimo_diagnostico_cid["origem"] == "API_WHO_EXTERNA_CACHE_ASIDE"
+    assert caso_atualizado.ultimo_diagnostico_cid["status_validacao_cid"] == "CID Validada / Correta"
+    assert caso_atualizado.ultimo_diagnostico_cid["origem_preenchimento"] == "A1_RECEPCAO"
+    assert caso_atualizado.ultimo_diagnostico_cid["validado_em"]
+    assert "CID-11" in caso_atualizado.ultimo_diagnostico_cid["versao_tabela_cid"]
+    assert caso_atualizado.ultimo_diagnostico_cid["bloqueia_aprovacao_automatica"] is False
+    assert "CID Validada / Correta" in card_api
+    assert "Auditoria:" in card_api
 
 
 def test_apptest_inicia_com_postgres_por_padrao_quando_database_url_configurada(
@@ -520,3 +527,51 @@ def test_card_campo_revisao_cid_exibe_nome_e_descricao_doenca() -> None:
     card_outro = renderizar_card_campo_revisao(item_outro, diag_cid=diag)
     assert "Dor lombar baixa" not in card_outro
     assert renderizar_detalhes_doenca_cid(None) == ""
+
+
+def test_apptest_fluxo_4a_4b_modo_manual_e_bloqueio_cid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Valida via AppTest o retorno 4A (Modo A1 e Manual), 4B (bloqueio) e auditoria."""
+    monkeypatch.setenv("GROQ_API_KEY", "")
+    monkeypatch.setenv("POLITICA_CID", "extrair_restrito")
+    monkeypatch.setenv("A1_MODO_REPO", "memoria")
+    monkeypatch.setenv("WHO_ICD_ENABLED", "false")
+
+    at = AppTest.from_file(APP_PAINEL_PATH, default_timeout=30)
+    at.run()
+    assert not at.exception
+
+    # 1. Processa documento canônico (J06.9) -> Ramo 4A no Modo A1 Recepção
+    at.button(key="btn_proc_105").click().run()
+    assert not at.exception
+    caso_105 = at.session_state["painel_casos"][105]
+    assert caso_105.ultima_revisao_colaborador["permite_confirmar_direto"] is True
+    val_105 = caso_105.ultima_revisao_colaborador["validacao_cid"]
+    assert val_105["status_validacao"] == "CID Validada / Correta"
+    assert val_105["origem_preenchimento"] == "A1_RECEPCAO"
+    assert at.button(key="btn_conf_105").disabled is False
+
+    # 2. Abre Modo Manual -> digita CID inválida ("INVALIDO") -> Ramo 4B bloqueia salvar/confirmar
+    at.toggle(key="toggle_editar_105").set_value(True).run()
+    assert not at.exception
+    at.text_input(key="hitl_cid_105").set_value("INVALIDO").run()
+    assert not at.exception
+    assert at.button(key="btn_conf_editado_105").disabled is True
+    assert any("CID não encontrado" in err.value for err in at.error)
+
+    # 3. Corrige no Modo Manual para CID válida ("M54.5") -> atualiza descrição oficial e libera
+    at.text_input(key="hitl_cid_105").set_value("M54.5").run()
+    assert not at.exception
+    assert at.button(key="btn_conf_editado_105").disabled is False
+    assert any("Dor lombar baixa" in md.value for md in at.markdown)
+    assert any("Origem: Manual" in md.value for md in at.markdown)
+
+    at.button(key="btn_conf_editado_105").click().run()
+    assert not at.exception
+    caso_final = at.session_state["painel_casos"][105]
+    assert caso_final.estado_atual == "VALIDADO"
+    val_final = caso_final.trocas[-1].resultado["payload"]["validacao_cid"]
+    assert val_final["status_validacao"] == "CID Validada / Correta"
+    assert val_final["origem_preenchimento"] == "MANUAL"
+    assert val_final["codigo_cid"] == "M54.5"

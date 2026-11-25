@@ -614,3 +614,151 @@ def test_seed_cid10_datasus_zip_e_arquivo_versionado(tmp_path: Path) -> None:
     sql_repo = seed_repo.read_text(encoding="utf-8")
     assert "'M54.5', 'Dor lombar baixa'" in sql_repo
     assert "'J06.9'" in sql_repo
+
+
+def test_retorno_formulario_4a_cid_correta_e_4b_cid_invalida_com_auditoria(
+    tmp_path: Path,
+) -> None:
+    """Valida ramos 4A (CID Correta) e 4B (CID Inválida) + rastreabilidade do formulário."""
+    import pymupdf
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.endswith("/connect/token"):
+            return httpx.Response(200, json={"access_token": "tok-4a4b", "expires_in": 3600})
+        if url.endswith("/codeinfo/ME84.2"):
+            return httpx.Response(
+                200,
+                json={"code": "ME84.2", "stemId": "http://id.who.int/icd/release/11/2026-01/mms/842"},
+            )
+        if url.endswith("/mms/842"):
+            return httpx.Response(
+                200,
+                json={
+                    "code": "ME84.2",
+                    "classKind": "category",
+                    "chapter": "21",
+                    "title": {"@language": "pt", "@value": "Dor lombar baixa"},
+                    "definition": {
+                        "@language": "pt",
+                        "@value": "Dor localizada abaixo do rebordo costal.",
+                    },
+                },
+            )
+        return httpx.Response(404)
+
+    cliente_who = ClienteCidWHO(
+        base_url="https://id.who.int",
+        client_id="cli-test",
+        client_secret="sec-test",
+        transport=httpx.MockTransport(handler),
+    )
+    repo = RepositorioA1Memoria()
+    cfg = A1Config(groq_api_key="", politica_extrair_cid=True)
+    agente = AgenteA1(db=repo, llm=MockLLM(), config=cfg, cliente_cid=cliente_who)
+
+    def _gerar_pdf(
+        nome: str,
+        texto_cid: str,
+        periodo_txt: str = "de 09/11/2026 a 11/11/2026.",
+    ) -> Path:
+        caminho = tmp_path / nome
+        doc = pymupdf.open()
+        page = doc.new_page(width=600, height=350)
+        page.insert_text(
+            (40, 60),
+            (
+                "ATESTADO MEDICO\n"
+                "Atesto que Carla Souza necessita de 3 dias de afastamento\n"
+                f"{periodo_txt}\n"
+                f"{texto_cid}\n"
+                "Campinas - SP, 09 de novembro de 2026.\n"
+                "Dr. Marcos - CRM/SP 123456"
+            ),
+            fontsize=14,
+        )
+        doc.save(caminho)
+        doc.close()
+        return caminho
+
+    # 1. Ramo 4A no Modo A1 Recepção (a1.processar_documento com CID válida ME84.2)
+    pdf_valido = _gerar_pdf("cid_valido.pdf", "CID-11: ME84.2")
+    t_4a = copy.deepcopy(
+        _carregar_fixture("a1.processar_documento/carla_divergencia_dias.tarefa.json")
+    )
+    t_4a["id_mensagem"] = "fluxo-4a-doc-01"
+    t_4a["payload"] = {"arquivo_uri": str(pdf_valido), "mime": "application/pdf"}
+    r_4a = agente.executar(t_4a)
+
+    rev_4a = r_4a["payload"]["revisao_colaborador"]
+    assert rev_4a["permite_confirmar_direto"] is True
+    val_4a = rev_4a["validacao_cid"]
+    assert val_4a["status_validacao"] == "CID Validada / Correta"
+    assert val_4a["cid_valida"] is True
+    assert val_4a["nome_doenca"] == "Dor lombar baixa"
+    assert val_4a["descricao_oficial"] == "Dor localizada abaixo do rebordo costal."
+    assert val_4a["bloqueia_aprovacao_automatica"] is False
+    assert val_4a["requer_revisao_humana"] is False
+    assert val_4a["origem_preenchimento"] == "A1_RECEPCAO"
+    assert val_4a["validado_em"]
+    assert "CID-11" in val_4a["versao_tabela_cid"]
+    assert "Status CID:** CID Validada / Correta" in rev_4a["resumo_markdown"]
+
+    # 2. Ramo 4A no Modo Manual (a1.confirmar com correção de CID para M54.5)
+    t_conf_manual = copy.deepcopy(
+        _carregar_fixture("a1.confirmar/carla_confirmado_ia.tarefa.json")
+    )
+    t_conf_manual["id_mensagem"] = "fluxo-4a-manual-02"
+    t_conf_manual["payload"]["atestado_confirmado"]["cid"] = "M54.5"
+    t_conf_manual["payload"]["campos_corrigidos"] = ["cid"]
+    r_conf_manual = agente.executar(t_conf_manual)
+    assert r_conf_manual["status"] == "OK"
+    assert r_conf_manual["estado_proposto"] == "VALIDADO"
+    val_conf_4a = r_conf_manual["payload"]["validacao_cid"]
+    assert val_conf_4a["status_validacao"] == "CID Validada / Correta"
+    assert val_conf_4a["origem_preenchimento"] == "MANUAL"
+    assert val_conf_4a["nome_doenca"] == "Dor lombar baixa"
+    assert val_conf_4a["validado_em"]
+    assert val_conf_4a["versao_tabela_cid"]
+
+    # 3. Ramo 4B (a1.processar_documento com CID inválida/inexistente ZZ99.9)
+    pdf_invalido = _gerar_pdf(
+        "cid_invalido.pdf",
+        "CID-11: ZZ99.9",
+        periodo_txt="de 20/11/2026 a 22/11/2026.",
+    )
+    t_4b = copy.deepcopy(t_4a)
+    t_4b["id_mensagem"] = "fluxo-4b-doc-03"
+    t_4b["correlacao"]["id_caso"] = 110
+    t_4b["registro_inicial"]["inicio_informado"] = "2026-11-20"
+    t_4b["registro_inicial"]["dias_informados"] = 3
+    t_4b["payload"] = {"arquivo_uri": str(pdf_invalido), "mime": "application/pdf"}
+    r_4b = agente.executar(t_4b)
+
+    assert r_4b["status"] == "PRECISA_HUMANO"
+    rev_4b = r_4b["payload"]["revisao_colaborador"]
+    assert rev_4b["permite_confirmar_direto"] is False
+    assert "revisão humana" in rev_4b["titulo"].lower()
+    val_4b = rev_4b["validacao_cid"]
+    assert val_4b["status_validacao"] == "CID Não Encontrada / Inválida"
+    assert val_4b["cid_valida"] is False
+    assert val_4b["bloqueia_aprovacao_automatica"] is True
+    assert val_4b["requer_revisao_humana"] is True
+    assert val_4b["origem_preenchimento"] == "A1_RECEPCAO"
+    assert val_4b["validado_em"]
+    assert val_4b["versao_tabela_cid"]
+    assert "CID Não Encontrada / Inválida" in r_4b["saidas"][0]["texto"]
+    assert "aprovação automática foi bloqueada" in r_4b["saidas"][0]["texto"]
+
+    # 4. Ramo 4B em a1.confirmar bloqueia aprovação com motivo e auditoria
+    t_conf_4b = copy.deepcopy(t_conf_manual)
+    t_conf_4b["id_mensagem"] = "fluxo-4b-conf-04"
+    t_conf_4b["correlacao"]["id_caso"] = 110
+    t_conf_4b["payload"]["atestado_confirmado"]["cid"] = "ZZ99.9"
+    r_conf_4b = agente.executar(t_conf_4b)
+    assert r_conf_4b["status"] == "OK"
+    assert r_conf_4b["estado_proposto"] == "NOVO"
+    assert r_conf_4b["eventos"][0]["tipo"] == "atestado.invalido"
+    assert r_conf_4b["payload"]["validacao_cid"]["status_validacao"] == "CID Não Encontrada / Inválida"
+    assert r_conf_4b["payload"]["validacao_cid"]["bloqueia_aprovacao_automatica"] is True
+    assert r_conf_4b["payload"]["validacao_cid"]["origem_preenchimento"] == "MANUAL"
