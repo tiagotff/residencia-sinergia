@@ -359,8 +359,16 @@ def renderizar_card_origem_cid(diag: dict[str, Any] | None) -> str:
     capitulo = str(diag.get("capitulo") or "").strip()
     detalhe = str(diag.get("detalhe") or "").strip()
     origem = str(diag.get("origem") or "")
+    status_validacao = str(diag.get("status_validacao_cid") or "").strip()
+    bloqueia_aprov = bool(diag.get("bloqueia_aprovacao_automatica"))
+    origem_preench = str(diag.get("origem_preenchimento") or "").strip()
+    validado_em = str(diag.get("validado_em") or "").strip()
+    versao_tabela = str(diag.get("versao_tabela_cid") or "").strip()
 
     partes = [badge, f"<strong>CID {codigo}</strong>"]
+    if status_validacao:
+        var_status: VarianteBadge = "ok" if diag.get("valido") is True else "erro"
+        partes.append(renderizar_badge_status(status_validacao, var_status))
     if nome_doenca:
         partes.append(
             f"<span>— <strong>Nome da doença:</strong> {html.escape(nome_doenca)}</span>"
@@ -378,8 +386,27 @@ def renderizar_card_origem_cid(diag: dict[str, Any] | None) -> str:
         partes.append(
             '<span style="color:#1D4ED8;font-weight:600;">· Salvo em afastamento.cid</span>'
         )
+    if bloqueia_aprov:
+        partes.append(
+            '<span style="color:#991B1B;font-weight:600;">· Aprovação automática bloqueada (revisão humana)</span>'
+        )
     if not nome_doenca and detalhe:
         partes.append(f'<span style="color:#71717A;">({html.escape(detalhe)})</span>')
+
+    auditoria_itens: list[str] = []
+    if origem_preench:
+        rotulo_origem = "Manual" if origem_preench == "MANUAL" else "A1 Recepção"
+        auditoria_itens.append(f"Origem: {html.escape(rotulo_origem)}")
+    if validado_em:
+        auditoria_itens.append(f"Validado em: {html.escape(validado_em)}")
+    if versao_tabela:
+        auditoria_itens.append(f"Tabela CID: {html.escape(versao_tabela)}")
+    if auditoria_itens:
+        partes.append(
+            '<div style="width:100%;font-size:0.74rem;color:#52525B;margin-top:0.15rem;">'
+            f'<strong>Auditoria:</strong> {" · ".join(auditoria_itens)}'
+            "</div>"
+        )
 
     classe_box = f"sinergia-cid-box sinergia-cid-box--{variante}"
     return f'<div class="{classe_box}">{" ".join(partes)}</div>'

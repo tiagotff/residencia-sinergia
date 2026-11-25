@@ -23,6 +23,7 @@ from sinergia.agentes.a1_recepcao.repositorio import (
     RepositorioA1Protocol,
 )
 from sinergia.agentes.a1_recepcao.schemas import (
+    OrigemPreenchimentoFormulario,
     ResultadoA1,
     TarefaA1,
     exportar_json_schemas_a1,
@@ -236,6 +237,23 @@ class ClienteConexaoA0A1:
             diag["versao_cid"] = str(headers["X-Sinergia-Cid-Versao"])
         if headers.get("X-Sinergia-Cid-Detalhe"):
             diag["detalhe"] = unquote(headers["X-Sinergia-Cid-Detalhe"])
+        if headers.get("X-Sinergia-Cid-Status"):
+            diag["status_validacao_cid"] = unquote(headers["X-Sinergia-Cid-Status"])
+        if headers.get("X-Sinergia-Cid-Origem-Preenchimento"):
+            diag["origem_preenchimento"] = str(
+                headers["X-Sinergia-Cid-Origem-Preenchimento"]
+            )
+        if headers.get("X-Sinergia-Cid-Validado-Em"):
+            diag["validado_em"] = str(headers["X-Sinergia-Cid-Validado-Em"])
+        if headers.get("X-Sinergia-Cid-Versao-Tabela"):
+            diag["versao_tabela_cid"] = unquote(headers["X-Sinergia-Cid-Versao-Tabela"])
+        bloqueia_raw = headers.get("X-Sinergia-Cid-Bloqueia-Aprovacao")
+        if isinstance(bloqueia_raw, str) and bloqueia_raw.lower() in {"true", "false"}:
+            bloqueia = bloqueia_raw.lower() == "true"
+            diag["bloqueia_aprovacao_automatica"] = bloqueia
+            diag["requer_revisao_humana"] = bloqueia
+        if diag.get("valido") is True:
+            diag["descricao_oficial"] = descricao or nome_doenca
         return diag
 
     def _enviar_http_a1(
@@ -332,8 +350,13 @@ class ClienteConexaoA0A1:
             diagnostico_cid=diagnostico_cid,
         )
 
-    def consultar_cid(self, codigo_cid: str) -> dict[str, Any]:
-        """Valida um CID no fluxo oficial (Banco Local -> fallback API Externa OMS + cache-aside)."""
+    def consultar_cid(
+        self,
+        codigo_cid: str,
+        *,
+        origem_preenchimento: OrigemPreenchimentoFormulario = "MANUAL",
+    ) -> dict[str, Any]:
+        """Valida um CID no fluxo oficial e retorna o diagnóstico 4A/4B com auditoria."""
         cfg_consulta = A1Config(
             **{**self.config.__dict__, "politica_extrair_cid": True, "politica_cid_modo": "extrair_restrito"}
         )
@@ -343,13 +366,21 @@ class ClienteConexaoA0A1:
             config=cfg_consulta,
             cliente_cid=self._cliente_cid,
         )
-        codigo_norm, existe = servico._resolver_cid_com_fallback(codigo_cid)
+        codigo_norm, existe = servico._resolver_cid_com_fallback(
+            codigo_cid, origem_preenchimento=origem_preenchimento
+        )
         diag = copy.deepcopy(servico.ultimo_diagnostico_cid) or {
             "codigo_cid": codigo_cid.strip().upper() or None,
             "origem": "SINTAXE_INVALIDA",
             "valido": False,
             "nome_doenca": None,
             "descricao": None,
+            "status_validacao_cid": "CID Não Encontrada / Inválida",
+            "bloqueia_aprovacao_automatica": True,
+            "requer_revisao_humana": True,
+            "origem_preenchimento": origem_preenchimento,
+            "validado_em": datetime.now(UTC).isoformat(),
+            "versao_tabela_cid": servico._versao_tabela_cid_diagnostico(None),
         }
         diag.setdefault("codigo_cid", codigo_norm or codigo_cid.strip().upper())
         diag.setdefault("valido", existe)

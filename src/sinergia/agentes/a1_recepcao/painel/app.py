@@ -441,7 +441,7 @@ def _obter_diagnostico_cid_para_card(
     codigo_cid = str(ext.get("cid") or "").strip()
     if not codigo_cid or not cfg.politica_extrair_cid:
         return None
-    diag = cliente.consultar_cid(codigo_cid)
+    diag = cliente.consultar_cid(codigo_cid, origem_preenchimento="A1_RECEPCAO")
     caso.ultimo_diagnostico_cid = diag
     return diag
 
@@ -778,6 +778,18 @@ def _renderizar_aba_simulador(
                     st.divider()
                     atestado_direto = _montar_atestado_limpo(ext)
                     permite_direto = bool(revisao.get("permite_confirmar_direto", True))
+                    validacao_cid_rev = revisao.get("validacao_cid") or {}
+                    cid_bloqueada_4b = bool(
+                        validacao_cid_rev.get("bloqueia_aprovacao_automatica")
+                        or (caso.ultimo_diagnostico_cid or {}).get("bloqueia_aprovacao_automatica")
+                    )
+                    if cid_bloqueada_4b:
+                        st.error(
+                            "A aprovação automática do formulário foi bloqueada porque o código CID "
+                            "não foi encontrado ou é inválido/inativo. Corrija o código em modo de "
+                            "edição ou reenvie o documento.",
+                            title="CID Não Encontrada / Inválida (4B)",
+                        )
                     act_c1, act_c2 = st.columns([1.4, 1.2])
                     with act_c1:
                         if st.button(
@@ -798,7 +810,7 @@ def _renderizar_aba_simulador(
                             key=f"toggle_editar_{caso.id_caso}",
                         )
 
-                    if not permite_direto:
+                    if not permite_direto and not cid_bloqueada_4b:
                         st.warning(
                             "Preencha ou corrija as datas obrigatórias do afastamento antes de confirmar."
                         )
@@ -885,13 +897,30 @@ def _renderizar_aba_simulador(
                                 value=ext.get("municipio") or "",
                                 key=f"hitl_mun_{caso.id_caso}",
                             )
+                            cid_manual_invalida = False
                             if cfg.politica_extrair_cid:
                                 ed_cid = st.text_input(
                                     "CID-11 / CID-10 (opcional)",
                                     value=ext.get("cid") or "",
                                     key=f"hitl_cid_{caso.id_caso}",
-                                    help="Validado primeiro em afastamento.cid e, se ausente, na API externa WHO ICD (cache-aside).",
+                                    help="Validado em afastamento.cid / API OMS com atualização da descrição oficial para conferência.",
                                 )
+                                if ed_cid.strip():
+                                    diag_manual_cid = cliente.consultar_cid(
+                                        ed_cid.strip(),
+                                        origem_preenchimento="MANUAL",
+                                    )
+                                    st.markdown(
+                                        renderizar_card_origem_cid(diag_manual_cid),
+                                        unsafe_allow_html=True,
+                                    )
+                                    if diag_manual_cid.get("valido") is False:
+                                        cid_manual_invalida = True
+                                        st.error(
+                                            "Código CID não encontrado ou inválido/inativo. "
+                                            "Corrija o CID, deixe o campo em branco ou reenvie o documento.",
+                                            title="CID Não Encontrada / Inválida",
+                                        )
                             else:
                                 ed_cid = ""
                                 st.caption("Política LGPD (`nao_extrair`): CID não coletado.")
@@ -936,6 +965,7 @@ def _renderizar_aba_simulador(
                                 "💾 Salvar Alterações e Confirmar (a1.confirmar)",
                                 key=f"btn_conf_editado_{caso.id_caso}",
                                 type="primary",
+                                disabled=cid_manual_invalida,
                                 width="stretch",
                             ):
                                 t_conf_ed = montar_tarefa_confirmar(caso, editado, campos_corr)
