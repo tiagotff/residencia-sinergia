@@ -47,6 +47,7 @@ class A1Config:
     who_icd_language: str = "pt"
     who_icd_timeout_segundos: float = 10.0
     who_icd_seed_url: str = "http://localhost:8088"
+    who_icd_local_timeout_segundos: float = 2.0
 
     def __post_init__(self) -> None:
         if self.llm_timeout_segundos <= 0:
@@ -57,6 +58,8 @@ class A1Config:
             raise ValueError("max_paginas_pdf deve ser maior que zero.")
         if self.who_icd_timeout_segundos <= 0:
             raise ValueError("who_icd_timeout_segundos deve ser maior que zero.")
+        if self.who_icd_local_timeout_segundos <= 0:
+            raise ValueError("who_icd_local_timeout_segundos deve ser maior que zero.")
 
     @classmethod
     def from_env(cls) -> A1Config:
@@ -126,6 +129,9 @@ class A1Config:
             who_icd_seed_url=os.getenv(
                 "WHO_ICD_SEED_URL", "http://localhost:8088"
             ).strip().rstrip("/"),
+            who_icd_local_timeout_segundos=float(
+                os.getenv("WHO_ICD_LOCAL_TIMEOUT_SEGUNDOS", "2")
+            ),
         )
 
 

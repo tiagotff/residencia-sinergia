@@ -321,6 +321,9 @@ def _descrever_origem_cid(diag: dict[str, Any]) -> tuple[str, VarianteBadge]:
     origem = str(diag.get("origem") or "")
     if origem == "BANCO_LOCAL":
         return "🗄️ Banco Local (afastamento.cid)", "ok"
+    if origem == "CONTAINER_WHO_LOCAL_CACHE_ASIDE":
+        versao = str(diag.get("versao_cid") or "CID")
+        return f"🐳 Container Local WHO ({versao} · cache-aside)", "api"
     if origem == "API_WHO_EXTERNA_CACHE_ASIDE":
         versao = str(diag.get("versao_cid") or "CID")
         return f"🌐 API Externa OMS ({versao} · cache-aside)", "api"
@@ -371,7 +374,7 @@ def renderizar_card_origem_cid(diag: dict[str, Any] | None) -> str:
         partes.append(
             f'<span style="color:#71717A;">(Cap. {html.escape(capitulo)})</span>'
         )
-    if origem == "API_WHO_EXTERNA_CACHE_ASIDE":
+    if origem in {"CONTAINER_WHO_LOCAL_CACHE_ASIDE", "API_WHO_EXTERNA_CACHE_ASIDE"}:
         partes.append(
             '<span style="color:#1D4ED8;font-weight:600;">· Salvo em afastamento.cid</span>'
         )

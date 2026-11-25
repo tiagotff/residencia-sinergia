@@ -73,11 +73,20 @@ def criar_app_a1(agente: ServicoA1 | None = None) -> FastAPI:
     def health() -> dict[str, str]:
         modo_repo, modo_llm = _ler_modos_ambiente()
         cfg = obter_config_a1()
-        who_ativo = (
+        who_local_ativo = cfg.who_icd_enabled and bool(cfg.who_icd_seed_url.strip())
+        who_externa_ativo = (
             cfg.who_icd_enabled
             and bool(cfg.who_icd_client_id.strip())
             and bool(cfg.who_icd_client_secret.strip())
         )
+        if who_local_ativo and who_externa_ativo:
+            who_fallback = "container_local+externa"
+        elif who_local_ativo:
+            who_fallback = "container_local"
+        elif who_externa_ativo:
+            who_fallback = "externa"
+        else:
+            who_fallback = "somente_banco"
         return {
             "status": "ok",
             "agente": "A1",
@@ -85,7 +94,8 @@ def criar_app_a1(agente: ServicoA1 | None = None) -> FastAPI:
             "modo_repositorio": modo_repo
             or ("postgres" if cfg.database_url.strip() else "memoria"),
             "modo_llm": modo_llm or ("groq" if cfg.groq_api_key.strip() else "nao_configurado"),
-            "who_icd_api": "ativa" if who_ativo else "somente_banco",
+            "who_icd_api": "ativa" if (who_local_ativo or who_externa_ativo) else "somente_banco",
+            "who_icd_fallback": who_fallback,
         }
 
     @app_a1.post("/executar", response_model=ResultadoA1)

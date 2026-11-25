@@ -384,32 +384,44 @@ def verificar_who_icd_api(
         )
 
     cli = cliente or ClienteCidWHO(config=cfg)
-    if not cli.credenciais_configuradas:
+    if not cli.credenciais_externas_configuradas and not cli.local_base_url:
         return ItemDiagnostico(
             nome="API Externa WHO ICD (CID-11/CID-10)",
             status="aviso",
             resumo=(
-                "WHO_ICD_CLIENT_ID / WHO_ICD_CLIENT_SECRET vazios "
-                "(fallback externo desabilitado; usando apenas afastamento.cid)."
+                "Container local não configurado e WHO_ICD_CLIENT_ID / WHO_ICD_CLIENT_SECRET vazios "
+                "(usando apenas afastamento.cid)."
             ),
             detalhes={
                 "enabled": True,
                 "credenciais_configuradas": False,
                 "base_url": cfg.who_icd_base_url,
+                "local_base_url": cli.local_base_url,
             },
         )
 
     if not testar_rede:
+        if cli.credenciais_externas_configuradas:
+            resumo = (
+                f"Fallback 1: {cli.local_base_url or 'desativado'} · "
+                f"Fallback 2 (OAuth2): {cfg.who_icd_base_url} "
+                f"(release {cfg.who_icd_release_11}/{cfg.who_icd_language})."
+            )
+            status_item: Literal["ok", "aviso", "erro"] = "ok"
+        else:
+            resumo = (
+                f"Fallback 1: {cli.local_base_url} · "
+                "Fallback 2 externo sem credenciais OAuth2."
+            )
+            status_item = "aviso"
         return ItemDiagnostico(
             nome="API Externa WHO ICD (CID-11/CID-10)",
-            status="ok",
-            resumo=(
-                f"Credenciais OAuth2 configuradas para {cfg.who_icd_base_url} "
-                f"(release {cfg.who_icd_release_11}/{cfg.who_icd_language})."
-            ),
+            status=status_item,
+            resumo=resumo,
             detalhes={
                 "enabled": True,
-                "credenciais_configuradas": True,
+                "credenciais_configuradas": cli.credenciais_externas_configuradas,
+                "local_base_url": cli.local_base_url,
                 "base_url": cfg.who_icd_base_url,
                 "release_11": cfg.who_icd_release_11,
                 "language": cfg.who_icd_language,

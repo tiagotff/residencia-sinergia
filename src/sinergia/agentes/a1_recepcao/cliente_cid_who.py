@@ -77,6 +77,7 @@ class ResultadoConsultaCidWHO(BaseModel):
     status: Literal["ENCONTRADO", "NAO_ENCONTRADO", "INDISPONIVEL"]
     dados: DadosCidWHO | None = None
     detalhe: str | None = None
+    origem_consulta: Literal["CONTAINER_LOCAL", "API_EXTERNA"] | None = None
 
 
 @runtime_checkable
@@ -182,6 +183,7 @@ class ClienteCidWHO:
         *,
         config: A1Config | None = None,
         base_url: str | None = None,
+        local_base_url: str | None = None,
         token_url: str | None = None,
         client_id: str | None = None,
         client_secret: str | None = None,
@@ -190,12 +192,20 @@ class ClienteCidWHO:
         release_10: str | None = None,
         language: str | None = None,
         timeout_segundos: float | None = None,
+        local_timeout_segundos: float | None = None,
         requer_oauth: bool | None = None,
         transport: httpx.BaseTransport | None = None,
+        local_transport: httpx.BaseTransport | None = None,
         max_retries: int = 3,
     ) -> None:
         cfg = config or obter_config_a1()
         self.base_url = (base_url if base_url is not None else cfg.who_icd_base_url).strip().rstrip("/")
+        if local_base_url is not None:
+            self.local_base_url = local_base_url.strip().rstrip("/")
+        elif base_url is None:
+            self.local_base_url = cfg.who_icd_seed_url.strip().rstrip("/")
+        else:
+            self.local_base_url = ""
         self.token_url = (token_url if token_url is not None else cfg.who_icd_token_url).strip()
         self.client_id = (client_id if client_id is not None else cfg.who_icd_client_id).strip()
         self.client_secret = (
@@ -210,21 +220,32 @@ class ClienteCidWHO:
         self.timeout_segundos = float(
             timeout_segundos if timeout_segundos is not None else cfg.who_icd_timeout_segundos
         )
+        self.local_timeout_segundos = float(
+            local_timeout_segundos
+            if local_timeout_segundos is not None
+            else cfg.who_icd_local_timeout_segundos
+        )
         self.requer_oauth = (
             requer_oauth if requer_oauth is not None else not _eh_host_local(self.base_url)
         )
         self._transport = transport
+        self._local_transport = local_transport
         self._max_retries = max(1, int(max_retries))
         self._token_lock = threading.RLock()
         self._access_token: str | None = None
         self._token_expira_em: float = 0.0
 
     @property
-    def credenciais_configuradas(self) -> bool:
-        """Indica se o cliente possui o necessário para autenticar (ou se dispensa OAuth2)."""
+    def credenciais_externas_configuradas(self) -> bool:
+        """Indica se a API externa possui o necessário para autenticar."""
         if not self.requer_oauth:
             return True
         return bool(self.client_id and self.client_secret)
+
+    @property
+    def credenciais_configuradas(self) -> bool:
+        """Indica se há container local configurado ou credenciais para a API externa."""
+        return bool(self.local_base_url) or self.credenciais_externas_configuradas
 
     def _criar_http_client(self) -> httpx.Client:
         return httpx.Client(
@@ -322,9 +343,29 @@ class ClienteCidWHO:
 
         return ultima_status, None
 
+    def _criar_cliente_local(self) -> ClienteCidWHO:
+        return ClienteCidWHO(
+            base_url=self.local_base_url,
+            local_base_url="",
+            release_11=self.release_11,
+            linearization=self.linearization,
+            release_10=self.release_10,
+            language=self.language,
+            timeout_segundos=self.local_timeout_segundos,
+            requer_oauth=False,
+            transport=self._local_transport or self._transport,
+            max_retries=1,
+        )
+
+    def verificar_saude_local(self) -> bool:
+        """Verifica se o container Docker local ``whoicd/icd-api`` está acessível."""
+        if not self.local_base_url:
+            return False
+        return self._criar_cliente_local().verificar_saude()
+
     def verificar_saude(self) -> bool:
         """Verifica se o endpoint WHO configurado (externo ou container local) está acessível."""
-        if not self.credenciais_configuradas:
+        if not self.credenciais_externas_configuradas:
             return False
         url = f"{self.base_url}/icd/release/11/{self.release_11}/{self.linearization}"
         try:
@@ -447,34 +488,23 @@ class ClienteCidWHO:
             detalhe="Validado via WHO ICD-10 API",
         )
 
-    def consultar_cid(self, codigo_cid: str) -> ResultadoConsultaCidWHO:
-        """Consulta um código CID-11 ou CID-10 na API WHO configurada."""
-        codigo_norm = (codigo_cid or "").strip().upper()
-        if not codigo_norm or not cid_sintaxe_valida(codigo_norm):
-            return ResultadoConsultaCidWHO(
-                status="NAO_ENCONTRADO",
-                detalhe=f"Sintaxe CID inválida: {codigo_cid!r}",
-            )
-
-        if not self.credenciais_configuradas:
-            return ResultadoConsultaCidWHO(
-                status="INDISPONIVEL",
-                detalhe=(
-                    "WHO_ICD_CLIENT_ID / WHO_ICD_CLIENT_SECRET não configurados para "
-                    f"{self.base_url}."
-                ),
-            )
-
+    def _consultar_unico(self, codigo_norm: str) -> ResultadoConsultaCidWHO:
+        origem: Literal["CONTAINER_LOCAL", "API_EXTERNA"] = (
+            "CONTAINER_LOCAL" if not self.requer_oauth and _eh_host_local(self.base_url) else "API_EXTERNA"
+        )
         try:
             with self._criar_http_client() as client:
                 if eh_cid11(codigo_norm):
-                    return self._consultar_cid11(client, codigo_norm)
-                if eh_cid10(codigo_norm):
-                    return self._consultar_cid10(client, codigo_norm)
-                return ResultadoConsultaCidWHO(
-                    status="NAO_ENCONTRADO",
-                    detalhe=f"Formato CID não reconhecido: {codigo_norm!r}",
-                )
+                    res = self._consultar_cid11(client, codigo_norm)
+                elif eh_cid10(codigo_norm):
+                    res = self._consultar_cid10(client, codigo_norm)
+                else:
+                    return ResultadoConsultaCidWHO(
+                        status="NAO_ENCONTRADO",
+                        detalhe=f"Formato CID não reconhecido: {codigo_norm!r}",
+                        origem_consulta=origem,
+                    )
+                return res.model_copy(update={"origem_consulta": origem})
         except (httpx.HTTPError, RuntimeError, ValueError) as exc:
             _LOGGER.warning(
                 "Falha ao consultar CID %s na WHO API (%s): %s",
@@ -485,7 +515,37 @@ class ClienteCidWHO:
             return ResultadoConsultaCidWHO(
                 status="INDISPONIVEL",
                 detalhe=f"Erro ao consultar API WHO ({type(exc).__name__}).",
+                origem_consulta=origem,
             )
+
+    def consultar_cid(self, codigo_cid: str) -> ResultadoConsultaCidWHO:
+        """Consulta um código CID-11 ou CID-10 com 2 fallbacks: Container Local -> API Externa."""
+        codigo_norm = (codigo_cid or "").strip().upper()
+        if not codigo_norm or not cid_sintaxe_valida(codigo_norm):
+            return ResultadoConsultaCidWHO(
+                status="NAO_ENCONTRADO",
+                detalhe=f"Sintaxe CID inválida: {codigo_cid!r}",
+            )
+
+        # Fallback 1: Container Docker local whoicd/icd-api (sem OAuth2 e sem rate limit)
+        if self.local_base_url and self.local_base_url != self.base_url:
+            res_local = self._criar_cliente_local()._consultar_unico(codigo_norm)
+            if res_local.status == "ENCONTRADO":
+                return res_local.model_copy(update={"origem_consulta": "CONTAINER_LOCAL"})
+            if res_local.status == "NAO_ENCONTRADO" and eh_cid11(codigo_norm):
+                return res_local.model_copy(update={"origem_consulta": "CONTAINER_LOCAL"})
+
+        # Fallback 2: API Externa oficial da OMS (https://id.who.int) via OAuth2
+        if not self.credenciais_externas_configuradas:
+            return ResultadoConsultaCidWHO(
+                status="INDISPONIVEL",
+                detalhe=(
+                    "Container local indisponível/sem o código e WHO_ICD_CLIENT_ID / "
+                    f"WHO_ICD_CLIENT_SECRET não configurados para {self.base_url}."
+                ),
+            )
+
+        return self._consultar_unico(codigo_norm)
 
     def percorrer_arvore_icd11(
         self,

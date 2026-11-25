@@ -1264,7 +1264,15 @@ def _renderizar_aba_inspetor(cliente: ClienteConexaoA0A1) -> None:
                 renderizar_card_origem_cid(diag_consulta),
                 unsafe_allow_html=True,
             )
-            if diag_consulta.get("origem") == "API_WHO_EXTERNA_CACHE_ASIDE":
+            if diag_consulta.get("origem") in {
+                "CONTAINER_WHO_LOCAL_CACHE_ASIDE",
+                "API_WHO_EXTERNA_CACHE_ASIDE",
+            }:
+                fonte_txt = (
+                    "container local WHO"
+                    if diag_consulta.get("origem") == "CONTAINER_WHO_LOCAL_CACHE_ASIDE"
+                    else "API externa da OMS"
+                )
                 destino_repo = (
                     "PostgreSQL (`afastamento.cid`)"
                     if cliente.modo_repo == "postgres"
@@ -1277,7 +1285,7 @@ def _renderizar_aba_inspetor(cliente: ClienteConexaoA0A1) -> None:
                 )
                 st.success(
                     f"CID `{diag_consulta.get('codigo_cid')}` ({nome_doenca_salvo}) "
-                    f"consultado na API da OMS e salvo em {destino_repo}."
+                    f"consultado via {fonte_txt} e salvo em {destino_repo}."
                 )
 
         with st.expander("Catálogo local `afastamento.cid`", expanded=False):

@@ -572,9 +572,14 @@ class ServicoA1:
                     dados.capitulo,
                     nome_doenca=nome_doenca_who,
                 )
+            origem_diag = (
+                "CONTAINER_WHO_LOCAL_CACHE_ASIDE"
+                if getattr(res_who, "origem_consulta", None) == "CONTAINER_LOCAL"
+                else "API_WHO_EXTERNA_CACHE_ASIDE"
+            )
             self.ultimo_diagnostico_cid = {
                 "codigo_cid": codigo_salvo,
-                "origem": "API_WHO_EXTERNA_CACHE_ASIDE",
+                "origem": origem_diag,
                 "valido": True,
                 "nome_doenca": nome_doenca_who,
                 "descricao": dados.descricao,
