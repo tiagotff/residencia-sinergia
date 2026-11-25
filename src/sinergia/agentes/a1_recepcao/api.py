@@ -98,6 +98,11 @@ def criar_app_a1(agente: ServicoA1 | None = None) -> FastAPI:
                 response.headers["X-Sinergia-Cid-Origem"] = str(diag_cid["origem"])
             if diag_cid.get("codigo_cid"):
                 response.headers["X-Sinergia-Cid-Codigo"] = str(diag_cid["codigo_cid"])
+            nome_doenca = diag_cid.get("nome_doenca") or diag_cid.get("descricao")
+            if nome_doenca:
+                response.headers["X-Sinergia-Cid-Nome-Doenca"] = quote(
+                    str(nome_doenca), safe=""
+                )
             if diag_cid.get("descricao"):
                 response.headers["X-Sinergia-Cid-Descricao"] = quote(
                     str(diag_cid["descricao"]), safe=""

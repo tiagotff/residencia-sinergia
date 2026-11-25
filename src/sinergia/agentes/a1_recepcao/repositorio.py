@@ -107,6 +107,7 @@ class RegistroAtestadoDB(BaseModel):
     id_colaborador: int
     id_profissional: int
     codigo_cid: str | None = None
+    nome_doenca: str | None = None
     id_municipio: int
     tipo_documento: TipoDocumentoAfastamento = "atestado_medico"
     data_emissao: date
@@ -193,6 +194,7 @@ class RegistroCidRestritoDB(BaseModel):
 
     id_atestado: int
     codigo_cid: str
+    nome_doenca: str | None = None
     registrado_em: datetime
 
 
@@ -229,11 +231,17 @@ class RepositorioA1Protocol(Protocol):
     def obter_cid(self, codigo_cid: str | None) -> dict[str, str] | None: ...
 
     def salvar_cid(
-        self, codigo_cid: str, descricao: str, capitulo: str
+        self,
+        codigo_cid: str,
+        descricao: str,
+        capitulo: str,
+        *,
+        nome_doenca: str | None = None,
     ) -> str: ...
 
     def salvar_cids_em_lote(
-        self, registros: Sequence[tuple[str, str, str]]
+        self,
+        registros: Sequence[tuple[str, str, str] | tuple[str, str, str, str]],
     ) -> int: ...
 
     def listar_cids(
@@ -293,6 +301,7 @@ class RepositorioA1Protocol(Protocol):
         fim_afastamento: date | datetime,
         arquivo_uri: str,
         codigo_cid: str | None = None,
+        nome_doenca: str | None = None,
         origem_dados: OrigemDadosAtestado = "IA",
         arquivo_sha256: str | None = None,
         id_caso: int | None = None,
@@ -318,6 +327,7 @@ class RepositorioA1Protocol(Protocol):
         prazo_entrega_fisica: date,
         id_profissional: int | None = _NAO_INFORMADO,
         codigo_cid: str | None = _NAO_INFORMADO,
+        nome_doenca: str | None = _NAO_INFORMADO,
         id_municipio: int | None = _NAO_INFORMADO,
         tipo_documento: TipoDocumentoAfastamento | None = _NAO_INFORMADO,
         prazos_legais: Sequence[str] | None = _NAO_INFORMADO,
@@ -365,7 +375,11 @@ class RepositorioA1Protocol(Protocol):
     ) -> RegistroBaixaFisicaDB | None: ...
 
     def salvar_cid_restrito(
-        self, id_atestado: int, codigo_cid: str | None
+        self,
+        id_atestado: int,
+        codigo_cid: str | None,
+        *,
+        nome_doenca: str | None = None,
     ) -> RegistroCidRestritoDB | None: ...
 
     def obter_cid_restrito(
@@ -732,12 +746,40 @@ class RepositorioA1Postgres:
             row = cur.fetchone()
             return str(row["codigo_cid"]) if row is not None else None
 
+    def _resolver_nome_doenca_cid(
+        self,
+        cur: Any,
+        codigo_cid: str | None,
+        nome_doenca: str | None = None,
+    ) -> str | None:
+        if not codigo_cid or not codigo_cid.strip():
+            return None
+        if nome_doenca is not None and nome_doenca.strip():
+            return " ".join(nome_doenca.split()).strip()[:255]
+        codigo_norm = codigo_cid.strip().upper()[:8]
+        cur.execute(
+            """
+            SELECT COALESCE(NULLIF(btrim(nome_doenca), ''), descricao) AS nome_doenca
+            FROM afastamento.cid
+            WHERE UPPER(codigo_cid) = %s
+            LIMIT 1
+            """,
+            (codigo_norm,),
+        )
+        row = cur.fetchone()
+        if row is not None and row.get("nome_doenca"):
+            return str(row["nome_doenca"])[:255]
+        return None
+
     def obter_cid(self, codigo_cid: str | None) -> dict[str, str] | None:
         if not codigo_cid or not codigo_cid.strip():
             return None
         codigo_norm = codigo_cid.strip().upper()
         sql = """
-            SELECT codigo_cid, descricao, capitulo
+            SELECT codigo_cid,
+                   COALESCE(NULLIF(btrim(nome_doenca), ''), descricao) AS nome_doenca,
+                   descricao,
+                   capitulo
             FROM afastamento.cid
             WHERE UPPER(codigo_cid) = %s
             LIMIT 1
@@ -747,53 +789,76 @@ class RepositorioA1Postgres:
             row = cur.fetchone()
             if row is None:
                 return None
+            nome = str(row.get("nome_doenca") or row["descricao"])
             return {
                 "codigo_cid": str(row["codigo_cid"]),
+                "nome_doenca": nome,
                 "descricao": str(row["descricao"]),
                 "capitulo": str(row["capitulo"]),
             }
 
-    def salvar_cid(self, codigo_cid: str, descricao: str, capitulo: str) -> str:
+    def salvar_cid(
+        self,
+        codigo_cid: str,
+        descricao: str,
+        capitulo: str,
+        *,
+        nome_doenca: str | None = None,
+    ) -> str:
         codigo_norm = codigo_cid.strip().upper()[:8]
         if not codigo_norm:
             raise ValueError("codigo_cid é obrigatório.")
-        desc_limpa = (" ".join(descricao.split()).strip() or f"CID {codigo_norm}")[:255]
+        desc_limpa = " ".join(descricao.split()).strip() or f"CID {codigo_norm}"
+        nome_limpo = (
+            " ".join((nome_doenca or desc_limpa).split()).strip() or desc_limpa
+        )[:255]
         cap_limpo = (capitulo.strip() or codigo_norm[:1])[:10]
         sql = """
-            INSERT INTO afastamento.cid (codigo_cid, descricao, capitulo)
-            VALUES (%s, %s, %s)
+            INSERT INTO afastamento.cid (codigo_cid, nome_doenca, descricao, capitulo)
+            VALUES (%s, %s, %s, %s)
             ON CONFLICT (codigo_cid) DO UPDATE
-            SET descricao = EXCLUDED.descricao,
+            SET nome_doenca = EXCLUDED.nome_doenca,
+                descricao = EXCLUDED.descricao,
                 capitulo = EXCLUDED.capitulo
             RETURNING codigo_cid
         """
         with self._conectar() as conn, conn.cursor() as cur:
-            cur.execute(sql, (codigo_norm, desc_limpa, cap_limpo))
+            cur.execute(sql, (codigo_norm, nome_limpo, desc_limpa, cap_limpo))
             row = cur.fetchone()
             conn.commit()
             return str(row["codigo_cid"]) if row is not None else codigo_norm
 
     def salvar_cids_em_lote(
-        self, registros: Sequence[tuple[str, str, str]]
+        self,
+        registros: Sequence[tuple[str, str, str] | tuple[str, str, str, str]],
     ) -> int:
         if not registros:
             return 0
         normalizados = []
-        for codigo, descricao, capitulo in registros:
+        for item in registros:
+            if len(item) == 4:
+                codigo, nome_doenca, descricao, capitulo = item
+            else:
+                codigo, descricao, capitulo = item
+                nome_doenca = descricao
             codigo_norm = codigo.strip().upper()[:8]
             if not codigo_norm:
                 continue
-            desc_limpa = (" ".join(descricao.split()).strip() or f"CID {codigo_norm}")[:255]
+            desc_limpa = " ".join(descricao.split()).strip() or f"CID {codigo_norm}"
+            nome_limpo = (
+                " ".join((nome_doenca or desc_limpa).split()).strip() or desc_limpa
+            )[:255]
             cap_limpo = (capitulo.strip() or codigo_norm[:1])[:10]
-            normalizados.append((codigo_norm, desc_limpa, cap_limpo))
+            normalizados.append((codigo_norm, nome_limpo, desc_limpa, cap_limpo))
         if not normalizados:
             return 0
 
         sql = """
-            INSERT INTO afastamento.cid (codigo_cid, descricao, capitulo)
-            VALUES (%s, %s, %s)
+            INSERT INTO afastamento.cid (codigo_cid, nome_doenca, descricao, capitulo)
+            VALUES (%s, %s, %s, %s)
             ON CONFLICT (codigo_cid) DO UPDATE
-            SET descricao = EXCLUDED.descricao,
+            SET nome_doenca = EXCLUDED.nome_doenca,
+                descricao = EXCLUDED.descricao,
                 capitulo = EXCLUDED.capitulo
         """
         with self._conectar() as conn, conn.cursor() as cur:
@@ -811,18 +876,26 @@ class RepositorioA1Postgres:
                 termo = f"%{filtro.strip()}%"
                 cur.execute(
                     """
-                    SELECT codigo_cid, descricao, capitulo
+                    SELECT codigo_cid,
+                           COALESCE(NULLIF(btrim(nome_doenca), ''), descricao) AS nome_doenca,
+                           descricao,
+                           capitulo
                     FROM afastamento.cid
-                    WHERE codigo_cid ILIKE %s OR descricao ILIKE %s
+                    WHERE codigo_cid ILIKE %s
+                       OR nome_doenca ILIKE %s
+                       OR descricao ILIKE %s
                     ORDER BY codigo_cid ASC
                     LIMIT %s
                     """,
-                    (termo, termo, limite_seguro),
+                    (termo, termo, termo, limite_seguro),
                 )
             else:
                 cur.execute(
                     """
-                    SELECT codigo_cid, descricao, capitulo
+                    SELECT codigo_cid,
+                           COALESCE(NULLIF(btrim(nome_doenca), ''), descricao) AS nome_doenca,
+                           descricao,
+                           capitulo
                     FROM afastamento.cid
                     ORDER BY codigo_cid ASC
                     LIMIT %s
@@ -832,6 +905,7 @@ class RepositorioA1Postgres:
             return [
                 {
                     "codigo_cid": str(r["codigo_cid"]),
+                    "nome_doenca": str(r.get("nome_doenca") or r["descricao"]),
                     "descricao": str(r["descricao"]),
                     "capitulo": str(r["capitulo"]),
                 }
@@ -858,7 +932,13 @@ class RepositorioA1Postgres:
                    cp.sigla AS conselho,
                    ps.numero_registro AS registro_profissional,
                    ps.sigla_uf AS uf_profissional,
-                   COALESCE(cr.codigo_cid, a.codigo_cid) AS codigo_cid_restrito,
+                   COALESCE(a.codigo_cid, cr.codigo_cid) AS codigo_cid_restrito,
+                   COALESCE(
+                       NULLIF(btrim(a.nome_doenca), ''),
+                       NULLIF(btrim(cr.nome_doenca), ''),
+                       NULLIF(btrim(cid.nome_doenca), ''),
+                       cid.descricao
+                   ) AS nome_doenca,
                    cid.descricao AS cid_descricao,
                    a.postado_em
             FROM afastamento.atestado a
@@ -866,7 +946,7 @@ class RepositorioA1Postgres:
             JOIN afastamento.profissional_saude ps ON ps.id_profissional = a.id_profissional
             JOIN afastamento.conselho_profissional cp ON cp.id_conselho = ps.id_conselho
             LEFT JOIN afastamento.cid_restrito cr ON cr.id_atestado = a.id_atestado
-            LEFT JOIN afastamento.cid cid ON cid.codigo_cid = COALESCE(cr.codigo_cid, a.codigo_cid)
+            LEFT JOIN afastamento.cid cid ON cid.codigo_cid = COALESCE(a.codigo_cid, cr.codigo_cid)
             ORDER BY a.postado_em DESC, a.id_atestado DESC
             LIMIT %s
         """
@@ -1131,6 +1211,7 @@ class RepositorioA1Postgres:
         fim_afastamento: date | datetime,
         arquivo_uri: str,
         codigo_cid: str | None = None,
+        nome_doenca: str | None = None,
         origem_dados: OrigemDadosAtestado = "IA",
         arquivo_sha256: str | None = None,
         id_caso: int | None = None,
@@ -1146,13 +1227,14 @@ class RepositorioA1Postgres:
         if dt_fim < dt_inicio or _para_data(dt_fim) < _para_data(dt_inicio):
             raise ValueError("fim_afastamento não pode ser anterior a inicio_afastamento.")
 
-        codigo_cid_tabela = None if politica_cid_restrito else codigo_cid
+        cid_norm = codigo_cid.strip().upper()[:8] if codigo_cid and codigo_cid.strip() else None
         sql = """
             INSERT INTO afastamento.atestado (
                 id_caso,
                 id_colaborador,
                 id_profissional,
                 codigo_cid,
+                nome_doenca,
                 id_municipio,
                 tipo_documento,
                 data_emissao,
@@ -1162,17 +1244,23 @@ class RepositorioA1Postgres:
                 origem_dados,
                 status
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'PENDENTE')
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'PENDENTE')
             RETURNING *
         """
         with self._conectar() as conn, conn.cursor() as cur:
+            nome_doenca_final = (
+                self._resolver_nome_doenca_cid(cur, cid_norm, nome_doenca)
+                if cid_norm is not None
+                else None
+            )
             cur.execute(
                 sql,
                 (
                     id_caso,
                     id_colaborador,
                     id_profissional,
-                    codigo_cid_tabela,
+                    cid_norm,
+                    nome_doenca_final,
                     id_municipio,
                     tipo_documento,
                     data_emissao,
@@ -1185,16 +1273,17 @@ class RepositorioA1Postgres:
             row = cur.fetchone()
             registro = RegistroAtestadoDB(**row)
 
-            if politica_cid_restrito and codigo_cid is not None:
+            if politica_cid_restrito and cid_norm is not None:
                 cur.execute(
                     """
-                    INSERT INTO afastamento.cid_restrito (id_atestado, codigo_cid)
-                    VALUES (%s, %s)
+                    INSERT INTO afastamento.cid_restrito (id_atestado, codigo_cid, nome_doenca)
+                    VALUES (%s, %s, %s)
                     ON CONFLICT (id_atestado)
                     DO UPDATE SET codigo_cid = EXCLUDED.codigo_cid,
+                                  nome_doenca = EXCLUDED.nome_doenca,
                                   registrado_em = now()
                     """,
-                    (registro.id_atestado, codigo_cid),
+                    (registro.id_atestado, cid_norm, nome_doenca_final),
                 )
 
             if arquivo_sha256 and arquivo_sha256.strip():
@@ -1292,6 +1381,7 @@ class RepositorioA1Postgres:
         prazo_entrega_fisica: date,
         id_profissional: int | None = _NAO_INFORMADO,
         codigo_cid: str | None = _NAO_INFORMADO,
+        nome_doenca: str | None = _NAO_INFORMADO,
         id_municipio: int | None = _NAO_INFORMADO,
         tipo_documento: TipoDocumentoAfastamento | None = _NAO_INFORMADO,
         prazos_legais: Sequence[str] | None = _NAO_INFORMADO,
@@ -1320,43 +1410,65 @@ class RepositorioA1Postgres:
         if id_profissional is not _NAO_INFORMADO and id_profissional is not None:
             set_clauses.append("id_profissional = %s")
             params.append(id_profissional)
-        if codigo_cid is not _NAO_INFORMADO:
-            set_clauses.append("codigo_cid = %s")
-            params.append(None if politica_cid_restrito else codigo_cid)
-        if id_municipio is not _NAO_INFORMADO and id_municipio is not None:
-            set_clauses.append("id_municipio = %s")
-            params.append(id_municipio)
-        if tipo_documento is not _NAO_INFORMADO and tipo_documento is not None:
-            set_clauses.append("tipo_documento = %s")
-            params.append(tipo_documento)
-        if prazos_legais is not _NAO_INFORMADO and prazos_legais is not None:
-            set_clauses.append("prazos_legais = %s")
-            params.append(list(prazos_legais))
-
-        params.append(id_atestado)
-        sql = f"""
-            UPDATE afastamento.atestado
-            SET {', '.join(set_clauses)}
-            WHERE id_atestado = %s
-            RETURNING *
-        """
         with self._conectar() as conn, conn.cursor() as cur:
+            cid_norm_confirmado: str | None = None
+            nome_doenca_final: str | None = None
+            if codigo_cid is not _NAO_INFORMADO:
+                cid_norm_confirmado = (
+                    codigo_cid.strip().upper()[:8]
+                    if codigo_cid and str(codigo_cid).strip()
+                    else None
+                )
+                if cid_norm_confirmado is not None:
+                    nome_arg = None if nome_doenca is _NAO_INFORMADO else nome_doenca
+                    nome_doenca_final = self._resolver_nome_doenca_cid(
+                        cur, cid_norm_confirmado, nome_arg
+                    )
+                set_clauses.append("codigo_cid = %s")
+                params.append(cid_norm_confirmado)
+                set_clauses.append("nome_doenca = %s")
+                params.append(nome_doenca_final)
+            elif nome_doenca is not _NAO_INFORMADO:
+                set_clauses.append("nome_doenca = %s")
+                params.append(
+                    " ".join(str(nome_doenca).split()).strip()[:255]
+                    if nome_doenca is not None and str(nome_doenca).strip()
+                    else None
+                )
+            if id_municipio is not _NAO_INFORMADO and id_municipio is not None:
+                set_clauses.append("id_municipio = %s")
+                params.append(id_municipio)
+            if tipo_documento is not _NAO_INFORMADO and tipo_documento is not None:
+                set_clauses.append("tipo_documento = %s")
+                params.append(tipo_documento)
+            if prazos_legais is not _NAO_INFORMADO and prazos_legais is not None:
+                set_clauses.append("prazos_legais = %s")
+                params.append(list(prazos_legais))
+
+            params.append(id_atestado)
+            sql = f"""
+                UPDATE afastamento.atestado
+                SET {', '.join(set_clauses)}
+                WHERE id_atestado = %s
+                RETURNING *
+            """
             cur.execute(sql, tuple(params))
             row = cur.fetchone()
             if row is None:
                 raise ValueError(f"Atestado {id_atestado} não encontrado para confirmação.")
 
             if codigo_cid is not _NAO_INFORMADO and politica_cid_restrito:
-                if codigo_cid is not None:
+                if cid_norm_confirmado is not None:
                     cur.execute(
                         """
-                        INSERT INTO afastamento.cid_restrito (id_atestado, codigo_cid)
-                        VALUES (%s, %s)
+                        INSERT INTO afastamento.cid_restrito (id_atestado, codigo_cid, nome_doenca)
+                        VALUES (%s, %s, %s)
                         ON CONFLICT (id_atestado)
                         DO UPDATE SET codigo_cid = EXCLUDED.codigo_cid,
+                                      nome_doenca = EXCLUDED.nome_doenca,
                                       registrado_em = now()
                         """,
-                        (id_atestado, codigo_cid),
+                        (id_atestado, cid_norm_confirmado, nome_doenca_final),
                     )
                 else:
                     cur.execute(
@@ -1536,7 +1648,11 @@ class RepositorioA1Postgres:
             return RegistroBaixaFisicaDB(**row) if row is not None else None
 
     def salvar_cid_restrito(
-        self, id_atestado: int, codigo_cid: str | None
+        self,
+        id_atestado: int,
+        codigo_cid: str | None,
+        *,
+        nome_doenca: str | None = None,
     ) -> RegistroCidRestritoDB | None:
         with self._conectar() as conn, conn.cursor() as cur:
             if codigo_cid is None or not str(codigo_cid).strip():
@@ -1546,17 +1662,21 @@ class RepositorioA1Postgres:
                 )
                 conn.commit()
                 return None
-            cid_norm = str(codigo_cid).strip().upper()
+            cid_norm = str(codigo_cid).strip().upper()[:8]
+            nome_doenca_final = self._resolver_nome_doenca_cid(
+                cur, cid_norm, nome_doenca
+            )
             cur.execute(
                 """
-                INSERT INTO afastamento.cid_restrito (id_atestado, codigo_cid)
-                VALUES (%s, %s)
+                INSERT INTO afastamento.cid_restrito (id_atestado, codigo_cid, nome_doenca)
+                VALUES (%s, %s, %s)
                 ON CONFLICT (id_atestado)
                 DO UPDATE SET codigo_cid = EXCLUDED.codigo_cid,
+                              nome_doenca = EXCLUDED.nome_doenca,
                               registrado_em = now()
                 RETURNING *
                 """,
-                (id_atestado, cid_norm),
+                (id_atestado, cid_norm, nome_doenca_final),
             )
             row = cur.fetchone()
             conn.commit()
@@ -1586,6 +1706,7 @@ class RepositorioA1Memoria:
         self.usuarios_por_login: dict[str, int] = {}
         self.conselhos: dict[str, int] = {}
         self.cids: dict[str, str] = {}
+        self.cids_detalhes: dict[str, dict[str, str]] = {}
         self.profissionais: dict[int, dict[str, Any]] = {}
         self._chave_profissional: dict[tuple[int, str, str], int] = {}
         self.atestados: dict[int, RegistroAtestadoDB] = {}
@@ -1612,10 +1733,36 @@ class RepositorioA1Memoria:
         }
         self.conselhos = {"CRM": 1, "CRO": 2, "CRP": 3}
         self.cids = {
-            "M54.5": "Dor lombar baixa",
-            "F41.1": "Ansiedade generalizada",
-            "J06.9": "Infecção aguda das vias aéreas superiores",
-            "Z00.0": "Exame médico geral",
+            "M54.5": "Dor localizada na região lombar inferior (lombalgia não especificada).",
+            "F41.1": "Transtorno caracterizado por ansiedade e preocupação persistentes e excessivas.",
+            "J06.9": "Infecção aguda das vias aéreas superiores não especificada (resfriado comum / IVAS).",
+            "Z00.0": "Consulta médica para exame clínico geral ou rastreamento sem queixas específicas.",
+        }
+        self.cids_detalhes = {
+            "M54.5": {
+                "codigo_cid": "M54.5",
+                "nome_doenca": "Dor lombar baixa",
+                "descricao": "Dor localizada na região lombar inferior (lombalgia não especificada).",
+                "capitulo": "M",
+            },
+            "F41.1": {
+                "codigo_cid": "F41.1",
+                "nome_doenca": "Ansiedade generalizada",
+                "descricao": "Transtorno caracterizado por ansiedade e preocupação persistentes e excessivas.",
+                "capitulo": "F",
+            },
+            "J06.9": {
+                "codigo_cid": "J06.9",
+                "nome_doenca": "Infecção aguda das vias aéreas superiores",
+                "descricao": "Infecção aguda das vias aéreas superiores não especificada (resfriado comum / IVAS).",
+                "capitulo": "J",
+            },
+            "Z00.0": {
+                "codigo_cid": "Z00.0",
+                "nome_doenca": "Exame médico geral",
+                "descricao": "Consulta médica para exame clínico geral ou rastreamento sem queixas específicas.",
+                "capitulo": "Z",
+            },
         }
         self.colaboradores[42] = DadosColaboradorCadastro(
             id_colaborador=42,
@@ -1733,33 +1880,92 @@ class RepositorioA1Memoria:
         codigo_norm = codigo_cid.strip().upper()
         return codigo_norm if codigo_norm in self.cids else None
 
+    def _resolver_nome_doenca_memoria(
+        self,
+        codigo_cid: str | None,
+        nome_doenca: str | None = None,
+    ) -> str | None:
+        if not codigo_cid or not codigo_cid.strip():
+            return None
+        if nome_doenca is not None and nome_doenca.strip():
+            return " ".join(nome_doenca.split()).strip()[:255]
+        codigo_norm = codigo_cid.strip().upper()[:8]
+        detalhe = self.cids_detalhes.get(codigo_norm)
+        if detalhe:
+            nome = detalhe.get("nome_doenca") or detalhe.get("descricao")
+            if nome:
+                return nome[:255]
+        desc = self.cids.get(codigo_norm)
+        return desc[:255] if desc else None
+
+    @staticmethod
+    def _capitulo_padrao_cid(codigo_norm: str) -> str:
+        return (
+            codigo_norm[:2]
+            if len(codigo_norm) >= 4 and "." not in codigo_norm[:4]
+            else codigo_norm[:1]
+        )
+
     def obter_cid(self, codigo_cid: str | None) -> dict[str, str] | None:
         if not codigo_cid or not codigo_cid.strip():
             return None
         codigo_norm = codigo_cid.strip().upper()
+        detalhe = self.cids_detalhes.get(codigo_norm)
+        if detalhe is not None:
+            return dict(detalhe)
         descricao = self.cids.get(codigo_norm)
         if descricao is None:
             return None
         return {
             "codigo_cid": codigo_norm,
+            "nome_doenca": descricao,
             "descricao": descricao,
-            "capitulo": codigo_norm[:2] if len(codigo_norm) >= 4 and "." not in codigo_norm[:4] else codigo_norm[:1],
+            "capitulo": self._capitulo_padrao_cid(codigo_norm),
         }
 
-    def salvar_cid(self, codigo_cid: str, descricao: str, capitulo: str) -> str:
+    def salvar_cid(
+        self,
+        codigo_cid: str,
+        descricao: str,
+        capitulo: str,
+        *,
+        nome_doenca: str | None = None,
+    ) -> str:
         codigo_norm = codigo_cid.strip().upper()[:8]
         if not codigo_norm:
             raise ValueError("codigo_cid é obrigatório.")
-        self.cids[codigo_norm] = (" ".join(descricao.split()).strip() or f"CID {codigo_norm}")[:255]
+        desc_limpa = " ".join(descricao.split()).strip() or f"CID {codigo_norm}"
+        nome_limpo = (
+            " ".join((nome_doenca or desc_limpa).split()).strip() or desc_limpa
+        )[:255]
+        cap_limpo = (capitulo.strip() or self._capitulo_padrao_cid(codigo_norm))[:10]
+        self.cids[codigo_norm] = desc_limpa
+        self.cids_detalhes[codigo_norm] = {
+            "codigo_cid": codigo_norm,
+            "nome_doenca": nome_limpo,
+            "descricao": desc_limpa,
+            "capitulo": cap_limpo,
+        }
         return codigo_norm
 
     def salvar_cids_em_lote(
-        self, registros: Sequence[tuple[str, str, str]]
+        self,
+        registros: Sequence[tuple[str, str, str] | tuple[str, str, str, str]],
     ) -> int:
         total = 0
-        for codigo, descricao, capitulo in registros:
+        for item in registros:
+            if len(item) == 4:
+                codigo, nome_doenca, descricao, capitulo = item
+            else:
+                codigo, descricao, capitulo = item
+                nome_doenca = descricao
             if codigo and codigo.strip():
-                self.salvar_cid(codigo, descricao, capitulo)
+                self.salvar_cid(
+                    codigo,
+                    descricao,
+                    capitulo,
+                    nome_doenca=nome_doenca,
+                )
                 total += 1
         return total
 
@@ -1769,14 +1975,23 @@ class RepositorioA1Memoria:
         termo = filtro.strip().lower() if filtro and filtro.strip() else None
         itens: list[dict[str, str]] = []
         for codigo in sorted(self.cids.keys()):
-            desc = self.cids[codigo]
-            if termo and termo not in codigo.lower() and termo not in desc.lower():
+            det = self.cids_detalhes.get(codigo)
+            desc = det["descricao"] if det else self.cids[codigo]
+            nome = det["nome_doenca"] if det else desc
+            cap = det["capitulo"] if det else self._capitulo_padrao_cid(codigo)
+            if (
+                termo
+                and termo not in codigo.lower()
+                and termo not in desc.lower()
+                and termo not in nome.lower()
+            ):
                 continue
             itens.append(
                 {
                     "codigo_cid": codigo,
+                    "nome_doenca": nome,
                     "descricao": desc,
-                    "capitulo": codigo[:2] if len(codigo) >= 4 and "." not in codigo[:4] else codigo[:1],
+                    "capitulo": cap,
                 }
             )
             if len(itens) >= limite:
@@ -1796,7 +2011,12 @@ class RepositorioA1Memoria:
             colab = self.colaboradores.get(at.id_colaborador)
             prof = self.obter_profissional(at.id_profissional) or {}
             cid_reg = self.cids_restritos.get(at.id_atestado)
-            cid_cod = cid_reg.codigo_cid if cid_reg is not None else at.codigo_cid
+            cid_cod = at.codigo_cid or (cid_reg.codigo_cid if cid_reg is not None else None)
+            nome_doenca = (
+                at.nome_doenca
+                or (cid_reg.nome_doenca if cid_reg is not None else None)
+                or self._resolver_nome_doenca_memoria(cid_cod)
+            )
             saida.append(
                 {
                     "id_atestado": at.id_atestado,
@@ -1815,6 +2035,7 @@ class RepositorioA1Memoria:
                     "registro_profissional": prof.get("numero"),
                     "uf_profissional": prof.get("uf"),
                     "codigo_cid_restrito": cid_cod,
+                    "nome_doenca": nome_doenca,
                     "cid_descricao": self.cids.get(cid_cod) if cid_cod else None,
                     "postado_em": at.postado_em,
                 }
@@ -2002,6 +2223,7 @@ class RepositorioA1Memoria:
         fim_afastamento: date | datetime,
         arquivo_uri: str,
         codigo_cid: str | None = None,
+        nome_doenca: str | None = None,
         origem_dados: OrigemDadosAtestado = "IA",
         arquivo_sha256: str | None = None,
         id_caso: int | None = None,
@@ -2029,13 +2251,15 @@ class RepositorioA1Memoria:
 
         id_atestado = self._seq_atestado
         self._seq_atestado += 1
-        cid_norm = codigo_cid.upper() if codigo_cid else None
+        cid_norm = codigo_cid.strip().upper()[:8] if codigo_cid and codigo_cid.strip() else None
+        nome_doenca_final = self._resolver_nome_doenca_memoria(cid_norm, nome_doenca)
         registro = RegistroAtestadoDB(
             id_atestado=id_atestado,
             id_caso=id_caso,
             id_colaborador=id_colaborador,
             id_profissional=id_profissional,
-            codigo_cid=None if politica_cid_restrito else cid_norm,
+            codigo_cid=cid_norm,
+            nome_doenca=nome_doenca_final,
             id_municipio=id_municipio,
             tipo_documento=tipo_documento,
             data_emissao=data_emissao,
@@ -2048,7 +2272,9 @@ class RepositorioA1Memoria:
         )
         self.atestados[id_atestado] = registro
         if politica_cid_restrito and cid_norm is not None:
-            self.salvar_cid_restrito(id_atestado, cid_norm)
+            self.salvar_cid_restrito(
+                id_atestado, cid_norm, nome_doenca=nome_doenca_final
+            )
         if arquivo_sha256 and arquivo_sha256.strip():
             self.registrar_arquivo_atestado(
                 id_atestado,
@@ -2116,6 +2342,7 @@ class RepositorioA1Memoria:
         prazo_entrega_fisica: date,
         id_profissional: int | None = _NAO_INFORMADO,
         codigo_cid: str | None = _NAO_INFORMADO,
+        nome_doenca: str | None = _NAO_INFORMADO,
         id_municipio: int | None = _NAO_INFORMADO,
         tipo_documento: TipoDocumentoAfastamento | None = _NAO_INFORMADO,
         prazos_legais: Sequence[str] | None = _NAO_INFORMADO,
@@ -2145,12 +2372,21 @@ class RepositorioA1Memoria:
         if codigo_cid is not _NAO_INFORMADO:
             if codigo_cid is not None and codigo_cid.upper() not in self.cids:
                 raise ValueError(f"CID {codigo_cid!r} inexistente no catálogo.")
-            cid_norm = codigo_cid.upper() if codigo_cid else None
+            cid_norm = codigo_cid.strip().upper()[:8] if codigo_cid and codigo_cid.strip() else None
+            nome_arg = None if nome_doenca is _NAO_INFORMADO else nome_doenca
+            nome_doenca_final = self._resolver_nome_doenca_memoria(cid_norm, nome_arg)
+            updates["codigo_cid"] = cid_norm
+            updates["nome_doenca"] = nome_doenca_final
             if politica_cid_restrito:
-                updates["codigo_cid"] = None
-                self.salvar_cid_restrito(id_atestado, cid_norm)
-            else:
-                updates["codigo_cid"] = cid_norm
+                self.salvar_cid_restrito(
+                    id_atestado, cid_norm, nome_doenca=nome_doenca_final
+                )
+        elif nome_doenca is not _NAO_INFORMADO:
+            updates["nome_doenca"] = (
+                " ".join(str(nome_doenca).split()).strip()[:255]
+                if nome_doenca is not None and str(nome_doenca).strip()
+                else None
+            )
         if id_municipio is not _NAO_INFORMADO and id_municipio is not None:
             if id_municipio not in self.municipios:
                 raise ValueError(f"Município {id_municipio} inexistente.")
@@ -2320,17 +2556,23 @@ class RepositorioA1Memoria:
         return reg.model_copy(deep=True) if reg is not None else None
 
     def salvar_cid_restrito(
-        self, id_atestado: int, codigo_cid: str | None
+        self,
+        id_atestado: int,
+        codigo_cid: str | None,
+        *,
+        nome_doenca: str | None = None,
     ) -> RegistroCidRestritoDB | None:
         if codigo_cid is None or not str(codigo_cid).strip():
             self.cids_restritos.pop(id_atestado, None)
             return None
-        cid_norm = str(codigo_cid).strip().upper()
+        cid_norm = str(codigo_cid).strip().upper()[:8]
         if cid_norm not in self.cids:
             raise ValueError(f"CID {codigo_cid!r} inexistente no catálogo.")
+        nome_doenca_final = self._resolver_nome_doenca_memoria(cid_norm, nome_doenca)
         registro = RegistroCidRestritoDB(
             id_atestado=id_atestado,
             codigo_cid=cid_norm,
+            nome_doenca=nome_doenca_final,
             registrado_em=datetime.now(UTC),
         )
         self.cids_restritos[id_atestado] = registro

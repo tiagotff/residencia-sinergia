@@ -518,6 +518,7 @@ class ServicoA1:
                 "codigo_cid": codigo_norm,
                 "origem": "SINTAXE_INVALIDA",
                 "valido": False,
+                "nome_doenca": None,
                 "descricao": None,
             }
             return None, False
@@ -532,10 +533,16 @@ class ServicoA1:
                 if hasattr(self.repositorio, "obter_cid")
                 else None
             )
+            nome_doenca_local = (
+                (info_local.get("nome_doenca") or info_local.get("descricao"))
+                if info_local
+                else None
+            )
             self.ultimo_diagnostico_cid = {
                 "codigo_cid": cid_local,
                 "origem": "BANCO_LOCAL",
                 "valido": True,
+                "nome_doenca": nome_doenca_local,
                 "descricao": info_local.get("descricao") if info_local else None,
                 "capitulo": info_local.get("capitulo") if info_local else None,
             }
@@ -547,6 +554,7 @@ class ServicoA1:
                 "codigo_cid": codigo_norm,
                 "origem": "NAO_ENCONTRADO_SEM_API",
                 "valido": None,
+                "nome_doenca": None,
                 "descricao": None,
                 "detalhe": "CID ausente no banco local e API WHO não configurada.",
             }
@@ -555,15 +563,20 @@ class ServicoA1:
         res_who = self.cliente_cid.consultar_cid(codigo_norm)
         if res_who.status == "ENCONTRADO" and res_who.dados is not None:
             dados = res_who.dados
+            nome_doenca_who = dados.nome_doenca or dados.descricao
             codigo_salvo = dados.codigo_cid
             if hasattr(self.repositorio, "salvar_cid"):
                 codigo_salvo = self.repositorio.salvar_cid(
-                    dados.codigo_cid, dados.descricao, dados.capitulo
+                    dados.codigo_cid,
+                    dados.descricao,
+                    dados.capitulo,
+                    nome_doenca=nome_doenca_who,
                 )
             self.ultimo_diagnostico_cid = {
                 "codigo_cid": codigo_salvo,
                 "origem": "API_WHO_EXTERNA_CACHE_ASIDE",
                 "valido": True,
+                "nome_doenca": nome_doenca_who,
                 "descricao": dados.descricao,
                 "capitulo": dados.capitulo,
                 "versao_cid": dados.versao_cid,
@@ -575,6 +588,7 @@ class ServicoA1:
                 "codigo_cid": codigo_norm,
                 "origem": "API_WHO_NAO_ENCONTRADO",
                 "valido": False,
+                "nome_doenca": None,
                 "descricao": None,
                 "detalhe": res_who.detalhe,
             }
@@ -589,6 +603,7 @@ class ServicoA1:
             "codigo_cid": codigo_norm,
             "origem": "API_WHO_INDISPONIVEL",
             "valido": None,
+            "nome_doenca": None,
             "descricao": None,
             "detalhe": res_who.detalhe,
         }
@@ -787,6 +802,12 @@ class ServicoA1:
 
         divergencias = detectar_divergencias(extraido, tarefa.registro_inicial)
         cid_valido, cid_existe = self._resolver_cid_com_fallback(extraido.cid)
+        nome_doenca_cid = (
+            self.ultimo_diagnostico_cid.get("nome_doenca")
+            or self.ultimo_diagnostico_cid.get("descricao")
+            if cid_valido and isinstance(self.ultimo_diagnostico_cid, dict)
+            else None
+        )
         if cid_existe is False and extraido.cid:
             divergencias.append(
                 DivergenciaCampo(
@@ -844,6 +865,7 @@ class ServicoA1:
                     fim_afastamento=fim,
                     arquivo_uri=payload.arquivo_uri,
                     codigo_cid=cid_valido,
+                    nome_doenca=nome_doenca_cid,
                     origem_dados="IA",
                     arquivo_sha256=res_ocr.sha256,
                     id_caso=id_caso,
@@ -948,6 +970,12 @@ class ServicoA1:
         ) or ("CRM", "CRO", "CRP")
 
         cid_valido, cid_existe = self._resolver_cid_com_fallback(mesclado.cid)
+        nome_doenca_cid = (
+            self.ultimo_diagnostico_cid.get("nome_doenca")
+            or self.ultimo_diagnostico_cid.get("descricao")
+            if cid_valido and isinstance(self.ultimo_diagnostico_cid, dict)
+            else None
+        )
 
         validacao = validar_dados_confirmados(
             mesclado,
@@ -1061,6 +1089,7 @@ class ServicoA1:
                 fim_afastamento=fim,
                 arquivo_uri=f"local://caso-{id_caso or id_colaborador}-confirmado",
                 codigo_cid=cid_valido,
+                nome_doenca=nome_doenca_cid,
                 origem_dados=validacao.origem,
                 id_caso=id_caso,
                 tipo_documento=mesclado.tipo_documento,
@@ -1068,6 +1097,7 @@ class ServicoA1:
             )
 
         codigo_cid_final = cid_valido if self.config.politica_extrair_cid else None
+        nome_doenca_final = nome_doenca_cid if codigo_cid_final else None
         confirmado = self.repositorio.confirmar_atestado_no_banco(
             pendente_db.id_atestado,
             inicio_afastamento=inicio,
@@ -1077,6 +1107,7 @@ class ServicoA1:
             prazo_entrega_fisica=validacao.prazo_entrega_fisica,
             id_profissional=id_prof if id_prof is not None else pendente_db.id_profissional,
             codigo_cid=codigo_cid_final,
+            nome_doenca=nome_doenca_final,
             id_municipio=id_municipio if id_municipio is not None else pendente_db.id_municipio,
             tipo_documento=mesclado.tipo_documento,
             prazos_legais=prazos_legais,

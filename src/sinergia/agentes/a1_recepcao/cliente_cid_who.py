@@ -18,11 +18,11 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, Self, runtime_checkable
 from urllib.parse import quote, urlparse, urlunparse
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from sinergia.agentes.a1_recepcao.config import A1Config, obter_config_a1
 from sinergia.agentes.a1_recepcao.validador import (
@@ -42,10 +42,31 @@ class DadosCidWHO(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     codigo_cid: str = Field(..., min_length=1, max_length=8)
-    descricao: str = Field(..., min_length=1, max_length=255)
+    nome_doenca: str = Field(default="", max_length=255)
+    descricao: str = Field(..., min_length=1)
     capitulo: str = Field(..., min_length=1, max_length=10)
     versao_cid: Literal["CID-11", "CID-10"] = "CID-11"
     uri: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sincronizar_antes(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            copia = dict(data)
+            nome = str(copia.get("nome_doenca") or "").strip()
+            desc = str(copia.get("descricao") or "").strip()
+            if not nome and desc:
+                copia["nome_doenca"] = _truncar(desc, 255)
+            elif not desc and nome:
+                copia["descricao"] = nome
+            return copia
+        return data
+
+    @model_validator(mode="after")
+    def _sincronizar_nome_doenca(self) -> Self:
+        if not self.nome_doenca.strip():
+            self.nome_doenca = _truncar(self.descricao, 255)
+        return self
 
 
 class ResultadoConsultaCidWHO(BaseModel):
@@ -82,6 +103,38 @@ def _truncar(texto: str, limite: int) -> str:
     if len(texto_limpo) <= limite:
         return texto_limpo
     return texto_limpo[: limite - 1].rstrip() + "…"
+
+
+def _extrair_descricao_entidade(entidade: dict[str, Any], *, nome_doenca: str) -> str:
+    """Extrai a descrição clínica da entidade WHO priorizando definition sobre title."""
+    for chave in ("definition", "longDefinition"):
+        texto = _extrair_texto_idioma(entidade.get(chave))
+        if texto:
+            return texto
+
+    fsn = _extrair_texto_idioma(entidade.get("fullySpecifiedName"))
+    if fsn and fsn.lower() != nome_doenca.strip().lower():
+        return fsn
+
+    inclusoes_raw = entidade.get("inclusion")
+    if isinstance(inclusoes_raw, list):
+        inclusoes: list[str] = []
+        vistos: set[str] = set()
+        for item in inclusoes_raw:
+            label = (
+                _extrair_texto_idioma(item.get("label"))
+                if isinstance(item, dict)
+                else _extrair_texto_idioma(item)
+            )
+            if label and label.lower() not in vistos:
+                vistos.add(label.lower())
+                inclusoes.append(label)
+            if len(inclusoes) >= 5:
+                break
+        if inclusoes:
+            return f"Inclui: {'; '.join(inclusoes)}"
+
+    return nome_doenca
 
 
 def _reescrever_uri_para_base(uri: str, base_url: str) -> str:
@@ -313,6 +366,7 @@ class ClienteCidWHO:
 
         url_entidade = _reescrever_uri_para_base(stem_uri, self.base_url)
         status_ent, entidade = self._get_json(client, url_entidade, language=self.language)
+        nome_doenca = ""
         descricao = ""
         capitulo_hint: str | None = None
         if status_ent == 200 and isinstance(entidade, dict):
@@ -322,20 +376,25 @@ class ClienteCidWHO:
                     status="NAO_ENCONTRADO",
                     detalhe=f"'{codigo_norm}' corresponde a {class_kind}, não a uma categoria CID.",
                 )
-            descricao = _extrair_texto_idioma(entidade.get("title"))
+            nome_doenca = _extrair_texto_idioma(entidade.get("title"))
             codigo_ent = str(entidade.get("code") or "").strip().upper()
             if codigo_ent and len(codigo_ent) <= 8:
                 codigo_oficial = codigo_ent
             capitulo_hint = str(entidade.get("chapter") or "").strip() or None
+            if not nome_doenca:
+                nome_doenca = f"CID-11 {codigo_oficial}"
+            descricao = _extrair_descricao_entidade(entidade, nome_doenca=nome_doenca)
+        else:
+            nome_doenca = f"CID-11 {codigo_oficial}"
+            descricao = nome_doenca
 
-        if not descricao:
-            descricao = f"CID-11 {codigo_oficial}"
-
+        nome_truncado = _truncar(nome_doenca, 255)
         return ResultadoConsultaCidWHO(
             status="ENCONTRADO",
             dados=DadosCidWHO(
                 codigo_cid=codigo_oficial[:8],
-                descricao=_truncar(descricao, 255),
+                nome_doenca=nome_truncado,
+                descricao=" ".join(descricao.split()).strip() or nome_truncado,
                 capitulo=_derivar_capitulo(codigo_oficial, capitulo_hint),
                 versao_cid="CID-11",
                 uri=stem_uri,
@@ -369,13 +428,18 @@ class ClienteCidWHO:
             )
 
         codigo_oficial = str(entidade.get("code") or codigo_norm).strip().upper()
-        descricao = _extrair_texto_idioma(entidade.get("title")) or f"CID-10 {codigo_oficial}"
+        nome_doenca = _truncar(
+            _extrair_texto_idioma(entidade.get("title")) or f"CID-10 {codigo_oficial}",
+            255,
+        )
+        descricao = _extrair_descricao_entidade(entidade, nome_doenca=nome_doenca)
         uri = str(entidade.get("@id") or url)
         return ResultadoConsultaCidWHO(
             status="ENCONTRADO",
             dados=DadosCidWHO(
                 codigo_cid=codigo_oficial[:8],
-                descricao=_truncar(descricao, 255),
+                nome_doenca=nome_doenca,
+                descricao=" ".join(descricao.split()).strip() or nome_doenca,
                 capitulo=_derivar_capitulo(codigo_oficial),
                 versao_cid="CID-10",
                 uri=uri,
@@ -476,11 +540,16 @@ class ClienteCidWHO:
                     and len(codigo_no) <= 8
                     and cid_sintaxe_valida(codigo_no)
                 ):
-                    descricao = _extrair_texto_idioma(no.get("title")) or f"CID-11 {codigo_no}"
+                    nome_doenca = _truncar(
+                        _extrair_texto_idioma(no.get("title")) or f"CID-11 {codigo_no}",
+                        255,
+                    )
+                    descricao = _extrair_descricao_entidade(no, nome_doenca=nome_doenca)
                     cap = _derivar_capitulo(codigo_no, prox_capitulo)
                     encontrados[codigo_no] = DadosCidWHO(
                         codigo_cid=codigo_no,
-                        descricao=_truncar(descricao, 255),
+                        nome_doenca=nome_doenca,
+                        descricao=" ".join(descricao.split()).strip() or nome_doenca,
                         capitulo=cap,
                         versao_cid="CID-11",
                         uri=str(no.get("@id") or uri_atual),
