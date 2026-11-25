@@ -478,3 +478,45 @@ def test_apptest_inicia_com_postgres_por_padrao_quando_database_url_configurada(
     at.run()
     assert not at.exception
     assert at.radio(key="sb_modo_repo").value == "postgres"
+
+
+def test_card_campo_revisao_cid_exibe_nome_e_descricao_doenca() -> None:
+    """Garante que o card de CID da etapa 3 exiba nome e descrição da doença."""
+    from sinergia.agentes.a1_recepcao.painel.tema import (
+        renderizar_card_campo_revisao,
+        renderizar_detalhes_doenca_cid,
+    )
+
+    diag = {
+        "codigo_cid": "ME84.2",
+        "nome_doenca": "Dor lombar baixa",
+        "descricao": "Condição definida como dor na região lombar.",
+    }
+    detalhes_html = renderizar_detalhes_doenca_cid(diag)
+    assert "Nome da doença:" in detalhes_html
+    assert "Dor lombar baixa" in detalhes_html
+    assert "Descrição:" in detalhes_html
+    assert "Condição definida como dor na região lombar." in detalhes_html
+
+    item_cid = {
+        "campo": "cid",
+        "rotulo": "Código CID-10",
+        "valor_exibicao": "ME84.2",
+        "confianca": 0.96,
+        "status": "lido_ok",
+    }
+    card_cid = renderizar_card_campo_revisao(item_cid, diag_cid=diag)
+    assert "ME84.2" in card_cid
+    assert "Dor lombar baixa" in card_cid
+    assert "Condição definida como dor na região lombar." in card_cid
+
+    item_outro = {
+        "campo": "municipio",
+        "rotulo": "Município de emissão",
+        "valor_exibicao": "Campinas",
+        "confianca": 0.95,
+        "status": "lido_ok",
+    }
+    card_outro = renderizar_card_campo_revisao(item_outro, diag_cid=diag)
+    assert "Dor lombar baixa" not in card_outro
+    assert renderizar_detalhes_doenca_cid(None) == ""

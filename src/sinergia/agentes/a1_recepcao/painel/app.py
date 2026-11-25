@@ -429,6 +429,23 @@ def _obter_ou_gerar_revisao(
     ).model_dump(mode="json")
 
 
+def _obter_diagnostico_cid_para_card(
+    caso: EstadoCasoSimulado,
+    ext: dict[str, Any],
+    cliente: ClienteConexaoA0A1,
+    cfg: A1Config,
+) -> dict[str, Any] | None:
+    """Obtém o diagnóstico CID (nome e descrição da doença) para o card da etapa 3."""
+    if isinstance(caso.ultimo_diagnostico_cid, dict):
+        return caso.ultimo_diagnostico_cid
+    codigo_cid = str(ext.get("cid") or "").strip()
+    if not codigo_cid or not cfg.politica_extrair_cid:
+        return None
+    diag = cliente.consultar_cid(codigo_cid)
+    caso.ultimo_diagnostico_cid = diag
+    return diag
+
+
 def _aplicar_cenario_rapido(
     caso: EstadoCasoSimulado,
     *,
@@ -743,11 +760,17 @@ def _renderizar_aba_simulador(
                             f"(esvaziados para preenchimento manual): {', '.join(baixos)}"
                         )
 
+                    diag_cid_card = _obter_diagnostico_cid_para_card(
+                        caso, ext, cliente, cfg
+                    )
                     grid_cols = st.columns(2)
                     for idx_item, item in enumerate(itens_revisao):
                         with grid_cols[idx_item % 2]:
                             st.markdown(
-                                renderizar_card_campo_revisao(item),
+                                renderizar_card_campo_revisao(
+                                    item,
+                                    diag_cid=diag_cid_card,
+                                ),
                                 unsafe_allow_html=True,
                             )
 

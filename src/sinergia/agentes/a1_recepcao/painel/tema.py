@@ -263,6 +263,19 @@ def obter_css_painel() -> str:
     margin-top: 0.2rem;
   }}
 
+  .sinergia-campo-doenca {{
+    margin-top: 0.35rem;
+    padding-top: 0.3rem;
+    border-top: 1px dashed {p["borda"]};
+    font-size: 0.78rem;
+    line-height: 1.35;
+    color: {p["texto_secundario"]};
+  }}
+
+  .sinergia-campo-doenca strong {{
+    color: {p["texto_principal"]};
+  }}
+
   .sinergia-diff-box {{
     background: {p["bg_secundario"]};
     border: 1px solid {p["borda"]};
@@ -421,7 +434,33 @@ def renderizar_barra_status_topo(
     return f'<div class="sinergia-status-bar">{"".join(partes)}</div>'
 
 
-def renderizar_card_campo_revisao(item: dict[str, Any]) -> str:
+def renderizar_detalhes_doenca_cid(diag_cid: dict[str, Any] | None) -> str:
+    """Renderiza nome e descrição da doença associada ao CID para exibição no card."""
+    if not diag_cid:
+        return ""
+    nome_doenca = str(diag_cid.get("nome_doenca") or "").strip()
+    descricao = str(diag_cid.get("descricao") or "").strip()
+    if not nome_doenca and descricao:
+        nome_doenca = descricao
+    if not nome_doenca and not descricao:
+        return ""
+
+    linhas: list[str] = []
+    if nome_doenca:
+        linhas.append(
+            f"<div><strong>Nome da doença:</strong> {html.escape(nome_doenca)}</div>"
+        )
+    if descricao and descricao != nome_doenca:
+        linhas.append(
+            f"<div><strong>Descrição:</strong> {html.escape(descricao)}</div>"
+        )
+    return f'<div class="sinergia-campo-doenca">{"".join(linhas)}</div>'
+
+
+def renderizar_card_campo_revisao(
+    item: dict[str, Any],
+    diag_cid: dict[str, Any] | None = None,
+) -> str:
     """Renderiza um cartão visual do Espelho de Leitura da IA (`ItemRevisaoCampo`)."""
     status = str(item.get("status", "lido_ok"))
     rotulo = str(item.get("rotulo") or item.get("campo") or "")
@@ -447,6 +486,12 @@ def renderizar_card_campo_revisao(item: dict[str, Any]) -> str:
         )
         badge_html = renderizar_badge_status(f"✓ Lido pela IA{pct}", "ok")
 
+    doenca_html = ""
+    if item.get("campo") == "cid":
+        diag_item = diag_cid if diag_cid is not None else item.get("diagnostico_cid")
+        if isinstance(diag_item, dict):
+            doenca_html = renderizar_detalhes_doenca_cid(diag_item)
+
     antes_html = ""
     if status == "divergente" and antes is not None:
         antes_html = (
@@ -462,6 +507,7 @@ def renderizar_card_campo_revisao(item: dict[str, Any]) -> str:
         f"{badge_html}"
         "</div>"
         f'<div class="sinergia-campo-valor">{html.escape(valor_exib)}</div>'
+        f"{doenca_html}"
         f"{antes_html}"
         "</div>"
     )
