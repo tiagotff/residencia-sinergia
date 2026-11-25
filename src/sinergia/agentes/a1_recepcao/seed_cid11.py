@@ -25,11 +25,21 @@ def _escapar_sql(texto: str) -> str:
     return texto.replace("'", "''")
 
 
-def gerar_sql_seed_cids(registros: Sequence[DadosCidWHO], destino: Path) -> Path:
+def gerar_sql_seed_cids(
+    registros: Sequence[DadosCidWHO],
+    destino: Path,
+    *,
+    cabecalho: str | None = None,
+) -> Path:
     """Exporta os CIDs extraídos como script SQL idempotente (INSERT ... ON CONFLICT)."""
     destino.parent.mkdir(parents=True, exist_ok=True)
+    comentario_topo = (
+        cabecalho.strip()
+        if cabecalho and cabecalho.strip()
+        else "-- Seed idempotente de CID-11 (pt-BR) gerada a partir do container local whoicd/icd-api."
+    )
     linhas = [
-        "-- Seed idempotente de CID-11 (pt-BR) gerada a partir do container local whoicd/icd-api.",
+        comentario_topo,
         "-- Seguro para executar múltiplas vezes.",
         "",
     ]
