@@ -22,6 +22,10 @@ from sinergia.agentes.a1_recepcao import (
     eh_cid11,
     limpar_cache_idempotencia,
 )
+from sinergia.agentes.a1_recepcao.seed_cid10 import (
+    executar_seed_cid10,
+    extrair_cids10_de_zip_bytes,
+)
 from sinergia.agentes.a1_recepcao.seed_cid11 import (
     executar_seed_cid11,
     gerar_sql_seed_cids,
@@ -406,3 +410,207 @@ def test_seed_ufs_brasil_contem_todas_as_27_ufs() -> None:
     ufs_encontradas = set(re.findall(r"\('([A-Z]{2})',", sql))
     assert len(ufs_encontradas) == 27
     assert {"SP", "RJ", "MG", "BA", "RS", "DF", "AM", "PE"}.issubset(ufs_encontradas)
+
+
+def test_cliente_cid_who_dois_fallbacks_local_e_externo() -> None:
+    """Valida cadeia: Container Local (Fallback 1) -> API Externa OAuth2 (Fallback 2)."""
+    chamadas_local: list[str] = []
+    chamadas_externas: list[str] = []
+
+    def handler_local_ativo(request: httpx.Request) -> httpx.Response:
+        chamadas_local.append(str(request.url))
+        if request.url.path.endswith("/codeinfo/ME84.2"):
+            return httpx.Response(
+                200,
+                json={"code": "ME84.2", "stemId": "http://id.who.int/icd/release/11/2026-01/mms/me842"},
+            )
+        if request.url.path.endswith("/mms/me842"):
+            return httpx.Response(
+                200,
+                json={
+                    "code": "ME84.2",
+                    "classKind": "category",
+                    "chapter": "21",
+                    "title": {"@language": "pt", "@value": "Dor lombar baixa"},
+                },
+            )
+        # Container local só tem CID-11 -> retorna 404 para CID-10
+        return httpx.Response(404)
+
+    def handler_externo(request: httpx.Request) -> httpx.Response:
+        chamadas_externas.append(str(request.url))
+        if str(request.url).endswith("/connect/token"):
+            return httpx.Response(200, json={"access_token": "tok-ext", "expires_in": 3600})
+        if request.url.path.endswith("/icd/release/10/2019/J06.9"):
+            return httpx.Response(
+                200,
+                json={
+                    "code": "J06.9",
+                    "classKind": "category",
+                    "title": {"@language": "en", "@value": "Acute upper respiratory infection, unspecified"},
+                },
+            )
+        if request.url.path.endswith("/codeinfo/CA07.0"):
+            return httpx.Response(
+                200,
+                json={"code": "CA07.0", "stemId": "http://id.who.int/icd/release/11/2026-01/mms/ca070"},
+            )
+        if request.url.path.endswith("/mms/ca070"):
+            return httpx.Response(
+                200,
+                json={
+                    "code": "CA07.0",
+                    "classKind": "category",
+                    "chapter": "12",
+                    "title": {"@language": "pt", "@value": "Nasofaringite aguda"},
+                },
+            )
+        return httpx.Response(404)
+
+    # 1. Container local responde CID-11 -> 0 chamadas na API externa
+    cli_ok = ClienteCidWHO(
+        base_url="https://id.who.int",
+        local_base_url="http://localhost:8088",
+        client_id="cli",
+        client_secret="sec",
+        transport=httpx.MockTransport(handler_externo),
+        local_transport=httpx.MockTransport(handler_local_ativo),
+    )
+    res_local = cli_ok.consultar_cid("ME84.2")
+    assert res_local.status == "ENCONTRADO"
+    assert res_local.origem_consulta == "CONTAINER_LOCAL"
+    assert res_local.dados is not None
+    assert res_local.dados.nome_doenca == "Dor lombar baixa"
+    assert len(chamadas_local) == 2
+    assert len(chamadas_externas) == 0
+
+    # 2. CID-10 dá 404 no container local (só CID-11) -> cai no Fallback 2 (API externa)
+    res_10_ext = cli_ok.consultar_cid("J06.9")
+    assert res_10_ext.status == "ENCONTRADO"
+    assert res_10_ext.origem_consulta == "API_EXTERNA"
+    assert res_10_ext.dados is not None
+    assert res_10_ext.dados.versao_cid == "CID-10"
+    assert any("/icd/release/10/2019/J06.9" in u for u in chamadas_externas)
+
+    # 3. Container local desligado (ConnectError) -> cai no Fallback 2 (API externa)
+    def handler_local_offline(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("container offline")
+
+    cli_offline_local = ClienteCidWHO(
+        base_url="https://id.who.int",
+        local_base_url="http://localhost:8088",
+        client_id="cli",
+        client_secret="sec",
+        transport=httpx.MockTransport(handler_externo),
+        local_transport=httpx.MockTransport(handler_local_offline),
+    )
+    res_fallback_ext = cli_offline_local.consultar_cid("CA07.0")
+    assert res_fallback_ext.status == "ENCONTRADO"
+    assert res_fallback_ext.origem_consulta == "API_EXTERNA"
+    assert res_fallback_ext.dados is not None
+    assert res_fallback_ext.dados.nome_doenca == "Nasofaringite aguda"
+
+
+def test_servico_a1_registra_origem_container_local_e_cache_aside() -> None:
+    def handler_local(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/codeinfo/ME84.2"):
+            return httpx.Response(
+                200,
+                json={"code": "ME84.2", "stemId": "http://id.who.int/icd/release/11/2026-01/mms/me842"},
+            )
+        if request.url.path.endswith("/mms/me842"):
+            return httpx.Response(
+                200,
+                json={
+                    "code": "ME84.2",
+                    "classKind": "category",
+                    "chapter": "21",
+                    "title": {"@language": "pt", "@value": "Dor lombar baixa"},
+                },
+            )
+        return httpx.Response(404)
+
+    cliente_who = ClienteCidWHO(
+        base_url="https://id.who.int",
+        local_base_url="http://localhost:8088",
+        client_id="",
+        client_secret="",
+        local_transport=httpx.MockTransport(handler_local),
+    )
+    repo = RepositorioA1Memoria()
+    agente = AgenteA1(
+        db=repo,
+        llm=MockLLM(),
+        config=A1Config(groq_api_key="", politica_extrair_cid=True),
+        cliente_cid=cliente_who,
+    )
+    t_miss = copy.deepcopy(_carregar_fixture("a1.confirmar/carla_confirmado_ia.tarefa.json"))
+    t_miss["id_mensagem"] = "who-container-local-01"
+    t_miss["payload"]["atestado_confirmado"]["cid"] = "ME84.2"
+    res = agente.executar(t_miss)
+    assert res["status"] == "OK"
+    assert res["estado_proposto"] == "VALIDADO"
+    assert agente.ultimo_diagnostico_cid is not None
+    assert agente.ultimo_diagnostico_cid["origem"] == "CONTAINER_WHO_LOCAL_CACHE_ASIDE"
+    assert "ME84.2" in repo.cids
+
+
+def test_seed_cid10_datasus_zip_e_arquivo_versionado(tmp_path: Path) -> None:
+    """Valida parser do pacote DATASUS CID10CSV.zip, geração SQL e seed versionado."""
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(
+            "CID-10-CAPITULOS.CSV",
+            (
+                "NUMCAP;CATINIC;CATFIM;DESCRICAO;DESCRABREV;\n"
+                "1;A00;B99;Capítulo I - Doenças infecciosas;I;\n"
+                "13;M00;M99;Capítulo XIII - Sistema osteomuscular;XIII;\n"
+            ).encode("latin-1"),
+        )
+        zf.writestr(
+            "CID-10-CATEGORIAS.CSV",
+            (
+                "CAT;CLASSIF;DESCRICAO;DESCRABREV;REFER;EXCLUIDOS;\n"
+                "A00;;Cólera;A00 Colera;;;\n"
+                "M54;;Dorsalgia;M54 Dorsalgia;;;\n"
+            ).encode("latin-1"),
+        )
+        zf.writestr(
+            "CID-10-SUBCATEGORIAS.CSV",
+            (
+                "SUBCAT;CLASSIF;RESTRSEXO;CAUSAOBITO;DESCRICAO;DESCRABREV;REFER;EXCLUIDOS;\n"
+                "A000;;;;Cólera devida a Vibrio cholerae 01, biótipo cholerae;A00.0;;;\n"
+                "M545;;;;Dor lombar baixa;M54.5;;;\n"
+            ).encode("latin-1"),
+        )
+
+    zip_path = tmp_path / "CID10CSV.zip"
+    zip_path.write_bytes(buf.getvalue())
+
+    cids_mem = extrair_cids10_de_zip_bytes(buf.getvalue())
+    assert {c.codigo_cid for c in cids_mem} == {"A00", "M54", "A00.0", "M54.5"}
+
+    sql_destino = tmp_path / "seed_cid10_teste.sql"
+    cids, inseridos = executar_seed_cid10(
+        arquivo_zip=zip_path,
+        gerar_sql=sql_destino,
+        dry_run=True,
+    )
+    assert inseridos == 0
+    assert len(cids) == 4
+    por_codigo = {c.codigo_cid: c for c in cids}
+    assert por_codigo["M54.5"].capitulo == "13"
+    assert por_codigo["M54.5"].nome_doenca == "Dor lombar baixa"
+    assert por_codigo["A00.0"].capitulo == "01"
+    conteudo_sql = sql_destino.read_text(encoding="utf-8")
+    assert "ON CONFLICT (codigo_cid) DO UPDATE" in conteudo_sql
+    assert "'M54.5', 'Dor lombar baixa', 'Dor lombar baixa', '13'" in conteudo_sql
+
+    seed_repo = Path("db/seeds/004_seed_cid10_pt.sql")
+    assert seed_repo.is_file()
+    sql_repo = seed_repo.read_text(encoding="utf-8")
+    assert "'M54.5', 'Dor lombar baixa'" in sql_repo
+    assert "'J06.9'" in sql_repo
