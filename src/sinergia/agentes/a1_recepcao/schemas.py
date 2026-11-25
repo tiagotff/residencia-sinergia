@@ -56,6 +56,11 @@ TipoDocumentoAfastamento = Literal[
 StatusRevisaoCampo = Literal[
     "lido_ok", "divergente", "baixa_confianca", "nao_identificado"
 ]
+StatusValidacaoCid = Literal[
+    "CID Validada / Correta",
+    "CID Não Encontrada / Inválida",
+]
+OrigemPreenchimentoFormulario = Literal["A1_RECEPCAO", "MANUAL"]
 
 
 # ============================================================================
@@ -344,6 +349,24 @@ class ItemRevisaoCampo(BaseModel):
     )
 
 
+class RetornoValidacaoCidFormulario(BaseModel):
+    """Resultado da decisão pós-validação de CID (4A vs 4B) e auditoria do formulário."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    codigo_cid: str
+    status_validacao: StatusValidacaoCid
+    cid_valida: bool
+    nome_doenca: str | None = None
+    descricao_oficial: str | None = None
+    bloqueia_aprovacao_automatica: bool = False
+    requer_revisao_humana: bool = False
+    mensagem_tratamento: str | None = None
+    origem_preenchimento: OrigemPreenchimentoFormulario = "A1_RECEPCAO"
+    validado_em: datetime | str
+    versao_tabela_cid: str
+
+
 class QuadroRevisaoAtestado(BaseModel):
     """Espelho completo dos dados lidos pelo LLM para validação/correção humana."""
 
@@ -365,6 +388,11 @@ class QuadroRevisaoAtestado(BaseModel):
     permite_confirmar_direto: bool = True
     permite_editar: bool = True
     requer_novo_arquivo: bool = False
+    validacao_cid: RetornoValidacaoCidFormulario | None = Field(
+        default=None,
+        exclude_if=lambda v: v is None,
+        description="Status 4A/4B e auditoria de validação do CID no formulário devolvido.",
+    )
 
 
 class DivergenciaCampo(BaseModel):
@@ -471,6 +499,11 @@ class PayloadConfirmarValidoResultado(BaseModel):
         default_factory=list,
         description="Marcos legais aplicáveis: 'inss_16_dias', 'exame_retorno' (Guia A1 v0.7).",
     )
+    validacao_cid: RetornoValidacaoCidFormulario | None = Field(
+        default=None,
+        exclude_if=lambda v: v is None,
+        description="Status 4A e auditoria de validação do CID quando aplicável.",
+    )
 
 
 class PayloadConfirmarInvalidoResultado(BaseModel):
@@ -479,6 +512,11 @@ class PayloadConfirmarInvalidoResultado(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     motivo: str
+    validacao_cid: RetornoValidacaoCidFormulario | None = Field(
+        default=None,
+        exclude_if=lambda v: v is None,
+        description="Status 4B e auditoria de bloqueio quando o CID é inválido.",
+    )
 
 
 # --- Ação 4: a1.registrar_baixa_fisica ---
@@ -803,6 +841,7 @@ def exportar_json_schemas_a1() -> dict[str, dict[str, Any]]:
         "ResultadoA1": ResultadoA1.model_json_schema(),
         "AtestadoExtraido": AtestadoExtraido.model_json_schema(),
         "QuadroRevisaoAtestado": QuadroRevisaoAtestado.model_json_schema(),
+        "RetornoValidacaoCidFormulario": RetornoValidacaoCidFormulario.model_json_schema(),
         "a1.conversar.tarefa": PayloadConversarTarefa.model_json_schema(),
         "a1.conversar.resultado": PayloadConversarResultado.model_json_schema(),
         "a1.processar_documento.tarefa": PayloadProcessarDocumentoTarefa.model_json_schema(),

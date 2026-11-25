@@ -131,6 +131,26 @@ def criar_app_a1(agente: ServicoA1 | None = None) -> FastAPI:
                 response.headers["X-Sinergia-Cid-Detalhe"] = quote(
                     str(diag_cid["detalhe"])[:200], safe=""
                 )
+            if diag_cid.get("status_validacao_cid"):
+                response.headers["X-Sinergia-Cid-Status"] = quote(
+                    str(diag_cid["status_validacao_cid"]), safe=""
+                )
+            if diag_cid.get("origem_preenchimento"):
+                response.headers["X-Sinergia-Cid-Origem-Preenchimento"] = str(
+                    diag_cid["origem_preenchimento"]
+                )
+            if diag_cid.get("validado_em"):
+                response.headers["X-Sinergia-Cid-Validado-Em"] = str(
+                    diag_cid["validado_em"]
+                )
+            if diag_cid.get("versao_tabela_cid"):
+                response.headers["X-Sinergia-Cid-Versao-Tabela"] = quote(
+                    str(diag_cid["versao_tabela_cid"]), safe=""
+                )
+            if diag_cid.get("bloqueia_aprovacao_automatica") is not None:
+                response.headers["X-Sinergia-Cid-Bloqueia-Aprovacao"] = str(
+                    bool(diag_cid["bloqueia_aprovacao_automatica"])
+                ).lower()
         return resultado
 
     return app_a1

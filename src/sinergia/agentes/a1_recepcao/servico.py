@@ -18,7 +18,7 @@ import re
 import threading
 from collections import OrderedDict
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any
 
@@ -48,6 +48,7 @@ from sinergia.agentes.a1_recepcao.schemas import (
     DivergenciaCampo,
     ErroAgente,
     EventoEmitido,
+    OrigemPreenchimentoFormulario,
     PayloadBaixaFisicaResultado,
     PayloadBaixaFisicaTarefa,
     PayloadConfirmarInvalidoResultado,
@@ -60,7 +61,9 @@ from sinergia.agentes.a1_recepcao.schemas import (
     PeriodoAfastamento,
     ProfissionalExtraido,
     ResultadoA1,
+    RetornoValidacaoCidFormulario,
     SaidaMensagem,
+    StatusValidacaoCid,
     TarefaA1,
 )
 from sinergia.agentes.a1_recepcao.validador import (
@@ -498,8 +501,107 @@ class ServicoA1:
             tuple[str | int, int, int | None], AtestadoExtraido
         ] = extracoes_pendentes if extracoes_pendentes is not None else {}
 
+    def _versao_tabela_cid_diagnostico(self, diag: dict[str, Any] | None) -> str:
+        versao_cid = str((diag or {}).get("versao_cid") or "").strip().upper()
+        if versao_cid == "CID-11":
+            return f"CID-11 ({self.config.who_icd_release_11})"
+        if versao_cid == "CID-10":
+            return f"CID-10 ({self.config.who_icd_release_10})"
+        return (
+            f"afastamento.cid (local / "
+            f"{self.config.who_icd_release_11}+{self.config.who_icd_release_10})"
+        )
+
+    def _enriquecer_diagnostico_cid(
+        self,
+        *,
+        origem_preenchimento: OrigemPreenchimentoFormulario,
+    ) -> None:
+        if not isinstance(self.ultimo_diagnostico_cid, dict):
+            return
+        valido_diag = self.ultimo_diagnostico_cid.get("valido")
+        status_validacao: StatusValidacaoCid | None = (
+            "CID Validada / Correta"
+            if valido_diag is True
+            else ("CID Não Encontrada / Inválida" if valido_diag is False else None)
+        )
+        descricao_oficial = (
+            self.ultimo_diagnostico_cid.get("descricao")
+            or self.ultimo_diagnostico_cid.get("nome_doenca")
+            if valido_diag is True
+            else None
+        )
+        self.ultimo_diagnostico_cid.update(
+            {
+                "status_validacao_cid": status_validacao,
+                "descricao_oficial": descricao_oficial,
+                "bloqueia_aprovacao_automatica": valido_diag is False,
+                "requer_revisao_humana": valido_diag is False,
+                "origem_preenchimento": origem_preenchimento,
+                "validado_em": datetime.now(UTC).isoformat(),
+                "versao_tabela_cid": self._versao_tabela_cid_diagnostico(
+                    self.ultimo_diagnostico_cid
+                ),
+            }
+        )
+
+    def _construir_retorno_validacao_cid(
+        self,
+    ) -> RetornoValidacaoCidFormulario | None:
+        diag = self.ultimo_diagnostico_cid
+        if not isinstance(diag, dict):
+            return None
+        valido_diag = diag.get("valido")
+        if valido_diag is None:
+            return None
+        codigo = str(diag.get("codigo_cid") or "").strip()
+        if not codigo:
+            return None
+        origem_raw = str(diag.get("origem_preenchimento") or "A1_RECEPCAO")
+        origem_preench: OrigemPreenchimentoFormulario = (
+            "MANUAL" if origem_raw == "MANUAL" else "A1_RECEPCAO"
+        )
+        validado_em = str(diag.get("validado_em") or datetime.now(UTC).isoformat())
+        versao_tabela = str(
+            diag.get("versao_tabela_cid") or self._versao_tabela_cid_diagnostico(diag)
+        )
+        if valido_diag is True:
+            desc_oficial = diag.get("descricao_oficial") or diag.get("descricao") or diag.get("nome_doenca")
+            return RetornoValidacaoCidFormulario(
+                codigo_cid=codigo,
+                status_validacao="CID Validada / Correta",
+                cid_valida=True,
+                nome_doenca=diag.get("nome_doenca") or desc_oficial,
+                descricao_oficial=desc_oficial,
+                bloqueia_aprovacao_automatica=False,
+                requer_revisao_humana=False,
+                mensagem_tratamento=None,
+                origem_preenchimento=origem_preench,
+                validado_em=validado_em,
+                versao_tabela_cid=versao_tabela,
+            )
+        return RetornoValidacaoCidFormulario(
+            codigo_cid=codigo,
+            status_validacao="CID Não Encontrada / Inválida",
+            cid_valida=False,
+            nome_doenca=None,
+            descricao_oficial=None,
+            bloqueia_aprovacao_automatica=True,
+            requer_revisao_humana=True,
+            mensagem_tratamento=(
+                "CID não encontrada, inativa ou inválida. Aprovação automática bloqueada; "
+                "corrija o código CID ou reenvie o documento."
+            ),
+            origem_preenchimento=origem_preench,
+            validado_em=validado_em,
+            versao_tabela_cid=versao_tabela,
+        )
+
     def _resolver_cid_com_fallback(
-        self, codigo_cid: str | None
+        self,
+        codigo_cid: str | None,
+        *,
+        origem_preenchimento: OrigemPreenchimentoFormulario = "A1_RECEPCAO",
     ) -> tuple[str | None, bool | None]:
         """Valida o CID primeiro em ``afastamento.cid``; se ausente, consulta a API externa WHO.
 
@@ -521,6 +623,7 @@ class ServicoA1:
                 "nome_doenca": None,
                 "descricao": None,
             }
+            self._enriquecer_diagnostico_cid(origem_preenchimento=origem_preenchimento)
             return None, False
 
         # 1. Consulta local no banco de dados (afastamento.cid)
@@ -546,6 +649,7 @@ class ServicoA1:
                 "descricao": info_local.get("descricao") if info_local else None,
                 "capitulo": info_local.get("capitulo") if info_local else None,
             }
+            self._enriquecer_diagnostico_cid(origem_preenchimento=origem_preenchimento)
             return cid_local, True
 
         # 2. Fallback na API externa da OMS (https://id.who.int) + cache-aside no banco
@@ -558,6 +662,7 @@ class ServicoA1:
                 "descricao": None,
                 "detalhe": "CID ausente no banco local e API WHO não configurada.",
             }
+            self._enriquecer_diagnostico_cid(origem_preenchimento=origem_preenchimento)
             return None, None
 
         res_who = self.cliente_cid.consultar_cid(codigo_norm)
@@ -586,6 +691,7 @@ class ServicoA1:
                 "capitulo": dados.capitulo,
                 "versao_cid": dados.versao_cid,
             }
+            self._enriquecer_diagnostico_cid(origem_preenchimento=origem_preenchimento)
             return codigo_salvo, True
 
         if res_who.status == "NAO_ENCONTRADO":
@@ -597,6 +703,7 @@ class ServicoA1:
                 "descricao": None,
                 "detalhe": res_who.detalhe,
             }
+            self._enriquecer_diagnostico_cid(origem_preenchimento=origem_preenchimento)
             return None, False
 
         _LOGGER.warning(
@@ -612,6 +719,7 @@ class ServicoA1:
             "descricao": None,
             "detalhe": res_who.detalhe,
         }
+        self._enriquecer_diagnostico_cid(origem_preenchimento=origem_preenchimento)
         return None, None
 
     def _identificador_repositorio(self) -> str | int:
@@ -806,7 +914,10 @@ class ServicoA1:
             return resultado, False
 
         divergencias = detectar_divergencias(extraido, tarefa.registro_inicial)
-        cid_valido, cid_existe = self._resolver_cid_com_fallback(extraido.cid)
+        cid_valido, cid_existe = self._resolver_cid_com_fallback(
+            extraido.cid, origem_preenchimento="A1_RECEPCAO"
+        )
+        retorno_validacao_cid = self._construir_retorno_validacao_cid()
         nome_doenca_cid = (
             self.ultimo_diagnostico_cid.get("nome_doenca")
             or self.ultimo_diagnostico_cid.get("descricao")
@@ -818,7 +929,7 @@ class ServicoA1:
                 DivergenciaCampo(
                     campo="cid",
                     no_documento=extraido.cid,
-                    informado="não encontrado na base local nem na API oficial da OMS",
+                    informado="CID Não Encontrada / Inválida",
                 )
             )
         self._guardar_extracao_pendente(tarefa, extraido)
@@ -900,6 +1011,7 @@ class ServicoA1:
             extraido,
             divergencias,
             politica_extrair_cid=self.config.politica_extrair_cid,
+            validacao_cid=retorno_validacao_cid,
         )
         payload_dict = {
             "atestado_extraido": _formatar_atestado_payload(extraido),
@@ -924,6 +1036,7 @@ class ServicoA1:
                         extraido,
                         divergencias,
                         politica_extrair_cid=self.config.politica_extrair_cid,
+                        validacao_cid=retorno_validacao_cid,
                     ),
                 )
             ],
@@ -974,7 +1087,15 @@ class ServicoA1:
             else ()
         ) or ("CRM", "CRO", "CRP")
 
-        cid_valido, cid_existe = self._resolver_cid_com_fallback(mesclado.cid)
+        origem_preenchimento: OrigemPreenchimentoFormulario = (
+            "MANUAL"
+            if any(c.strip() for c in payload.campos_corrigidos)
+            else "A1_RECEPCAO"
+        )
+        cid_valido, cid_existe = self._resolver_cid_com_fallback(
+            mesclado.cid, origem_preenchimento=origem_preenchimento
+        )
+        retorno_validacao_cid = self._construir_retorno_validacao_cid()
         nome_doenca_cid = (
             self.ultimo_diagnostico_cid.get("nome_doenca")
             or self.ultimo_diagnostico_cid.get("descricao")
@@ -1032,6 +1153,11 @@ class ServicoA1:
                 estado_proposto="NOVO",
                 payload=PayloadConfirmarInvalidoResultado(
                     motivo=validacao.motivo or "dados inválidos",
+                    validacao_cid=(
+                        retorno_validacao_cid
+                        if validacao.codigo_evento == "cid_invalido"
+                        else None
+                    ),
                 ),
                 saidas=saidas_inv,
                 eventos=[
@@ -1154,6 +1280,7 @@ class ServicoA1:
                 origem=validacao.origem,
                 prazo_entrega_fisica=validacao.prazo_entrega_fisica,
                 prazos_legais=prazos_legais,
+                validacao_cid=retorno_validacao_cid,
             ),
             saidas=[
                 SaidaMensagem(tipo="mensagem", texto=validacao.mensagem_usuario)

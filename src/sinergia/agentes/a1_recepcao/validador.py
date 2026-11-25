@@ -34,6 +34,7 @@ from sinergia.agentes.a1_recepcao.schemas import (
     ProfissionalExtraido,
     QuadroRevisaoAtestado,
     RegistroInicialCaso,
+    RetornoValidacaoCidFormulario,
     StatusRevisaoCampo,
 )
 
@@ -379,6 +380,7 @@ def construir_quadro_revisao_atestado(
     divergencias: Sequence[DivergenciaCampo],
     *,
     politica_extrair_cid: bool | None = None,
+    validacao_cid: RetornoValidacaoCidFormulario | None = None,
 ) -> QuadroRevisaoAtestado:
     """Constrói o espelho determinístico dos campos lidos pelo LLM para revisão humana."""
     incluir_cid = bool(politica_extrair_cid) or (extraido.cid is not None) or (
@@ -554,6 +556,9 @@ def construir_quadro_revisao_atestado(
         )
 
     itens: list[ItemRevisaoCampo] = []
+    cid_invalida_4b = (
+        validacao_cid is not None and not validacao_cid.cid_valida
+    ) or ("cid" in div_por_campo)
     for chave, rotulo, valor_lido, valor_fmt, editavel, obrigatorio in definicoes:
         meta = extraido.campos.get(chave)
         div = div_por_campo.get(chave)
@@ -563,6 +568,10 @@ def construir_quadro_revisao_atestado(
             status_campo: StatusRevisaoCampo = "divergente"
             valor_exibicao = valor_fmt if valor_lido is not None else "Não identificado"
             valor_antes = div.informado
+        elif chave == "cid" and cid_invalida_4b:
+            status_campo = "divergente"
+            valor_exibicao = valor_fmt if valor_lido is not None else "Não identificado"
+            valor_antes = "CID Não Encontrada / Inválida"
         elif meta is not None and meta.vazio_por_baixa_confianca:
             status_campo = "baixa_confianca"
             valor_exibicao = "Baixa confiança — conferir/preencher"
@@ -639,27 +648,45 @@ def construir_quadro_revisao_atestado(
                 campo="cid",
             )
         )
+        if validacao_cid is not None:
+            linhas_md.append(f"- **Status CID:** {validacao_cid.status_validacao}")
+            desc_cid = validacao_cid.descricao_oficial or validacao_cid.nome_doenca
+            if validacao_cid.cid_valida and desc_cid:
+                linhas_md.append(f"- **Descrição oficial CID:** {desc_cid}")
 
     permite_confirmar = bool(
-        inicio is not None and fim is not None and fim >= inicio
+        inicio is not None and fim is not None and fim >= inicio and not cid_invalida_4b
     )
-    titulo = (
-        "Atenção: divergências encontradas — valide os dados"
-        if divergencias
-        else "Revise e valide os dados lidos no documento"
-    )
-    return QuadroRevisaoAtestado(
-        titulo=titulo,
-        instrucao_colaborador=(
+    if cid_invalida_4b:
+        titulo = (
+            "Inconsistência no CID — revisão humana necessária"
+            if (not divergencias or all(d.campo == "cid" for d in divergencias))
+            else "Atenção: divergências encontradas — valide os dados"
+        )
+        instrucao = (
+            "CID Não Encontrada / Inválida. A aprovação automática foi bloqueada: "
+            "corrija o código CID ou reenvie o documento."
+        )
+    else:
+        titulo = (
+            "Atenção: divergências encontradas — valide os dados"
+            if divergencias
+            else "Revise e valide os dados lidos no documento"
+        )
+        instrucao = (
             "Confira abaixo as informações lidas no seu documento. "
             "Confirme se está tudo certo ou informe o que precisa alterar."
-        ),
+        )
+    return QuadroRevisaoAtestado(
+        titulo=titulo,
+        instrucao_colaborador=instrucao,
         legibilidade="ok",
         resumo_markdown="\n".join(linhas_md),
         itens=itens,
         permite_confirmar_direto=permite_confirmar,
         permite_editar=True,
         requer_novo_arquivo=False,
+        validacao_cid=validacao_cid,
     )
 
 
@@ -668,6 +695,7 @@ def gerar_mensagem_confirmacao_extracao(
     divergencias: Sequence[DivergenciaCampo],
     *,
     politica_extrair_cid: bool | None = None,
+    validacao_cid: RetornoValidacaoCidFormulario | None = None,
 ) -> str:
     """Gera a pergunta de confirmação com todos os dados lidos após `a1.processar_documento`."""
     if extraido.legibilidade == "ilegivel":
@@ -714,8 +742,8 @@ def gerar_mensagem_confirmacao_extracao(
             )
         elif div.campo == "cid":
             frase_inicial = (
-                f"O código CID '{div.no_documento}' lido no documento não foi "
-                f"encontrado na tabela oficial CID. Pode conferir o código ou deixá-lo em branco?{sufixo_baixa_conf}"
+                f"O código CID '{div.no_documento}' foi marcado como 'CID Não Encontrada / Inválida' "
+                f"e a aprovação automática foi bloqueada. Corrija o código CID ou reenvie o documento.{sufixo_baixa_conf}"
             )
         else:
             frase_inicial = (
@@ -727,9 +755,15 @@ def gerar_mensagem_confirmacao_extracao(
             f"{d.campo}: no documento '{d.no_documento}' vs informado '{d.informado}'"
             for d in divergencias
         )
+        bloqueio_cid_txt = (
+            " Aprovação automática bloqueada por CID Não Encontrada / Inválida — corrija o CID ou reenvie o documento."
+            if (validacao_cid is not None and not validacao_cid.cid_valida)
+            or any(d.campo == "cid" for d in divergencias)
+            else " Pode revisar e confirmar os dados corretos?"
+        )
         frase_inicial = (
-            f"Encontrei diferenças entre o atestado e o informado inicialmente ({itens}). "
-            f"Pode revisar e confirmar os dados corretos?{sufixo_baixa_conf}"
+            f"Encontrei diferenças entre o atestado e o informado inicialmente ({itens})."
+            f"{bloqueio_cid_txt}{sufixo_baixa_conf}"
         )
     elif inicio is not None and fim is not None:
         dias = extraido.periodo.dias_calculados
@@ -743,7 +777,10 @@ def gerar_mensagem_confirmacao_extracao(
         )
 
     quadro = construir_quadro_revisao_atestado(
-        extraido, divergencias, politica_extrair_cid=politica_extrair_cid
+        extraido,
+        divergencias,
+        politica_extrair_cid=politica_extrair_cid,
+        validacao_cid=validacao_cid,
     )
     return (
         f"{frase_inicial}\n\n"
@@ -975,8 +1012,9 @@ def validar_dados_confirmados(
                 motivo="código CID inválido",
                 codigo_evento="cid_invalido",
                 mensagem_usuario=(
-                    f"O código CID '{atestado.cid}' não está em um formato válido "
-                    "(ex.: ME84.2 ou M54.5). Pode conferir ou deixá-lo em branco?"
+                    f"O código CID '{atestado.cid}' foi marcado como 'CID Não Encontrada / Inválida' "
+                    "(formato esperado: ex. ME84.2 ou M54.5) e a aprovação automática foi bloqueada. "
+                    "Corrija o código CID ou reenvie o documento."
                 ),
                 erros_detalhe=[f"CID fora do padrão CID-11/CID-10: {atestado.cid!r}"],
             )
@@ -986,8 +1024,8 @@ def validar_dados_confirmados(
                 motivo="código CID não encontrado na tabela oficial CID",
                 codigo_evento="cid_invalido",
                 mensagem_usuario=(
-                    f"O código CID '{atestado.cid}' não foi encontrado na base local nem "
-                    "na API oficial da OMS. Pode conferir o código ou deixá-lo em branco?"
+                    f"O código CID '{atestado.cid}' foi marcado como 'CID Não Encontrada / Inválida' "
+                    "e a aprovação automática foi bloqueada. Corrija o código CID ou reenvie o documento."
                 ),
                 erros_detalhe=[f"CID inexistente na base/API WHO: {atestado.cid!r}"],
             )
